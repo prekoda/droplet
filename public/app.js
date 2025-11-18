@@ -1,6 +1,5 @@
 // ======= WebSocket Setup =======
-const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-const ws = new WebSocket(`${protocol}//${window.location.host}`);
+const ws = new WebSocket("wss://droplet-production-aaaf.up.railway.app"); // Railway backend
 
 let myUsername = "";
 let replyToMsg = null;
