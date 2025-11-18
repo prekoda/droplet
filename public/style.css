@@ -95,6 +95,23 @@ body.dark {
   animation: pop 0.15s forwards ease-out;
   position: relative;
 }
+/* IMAGE MESSAGES */
+.msg img {
+  max-width: 200px;
+  max-height: 200px;
+  border-radius: 12px;
+  display: block;
+  margin-top: 5px;
+}
+
+/* GIF/STICKER MESSAGES */
+.msg .sticker {
+  max-width: 150px;
+  max-height: 150px;
+  border-radius: 12px;
+  display: block;
+  margin-top: 5px;
+}
 
 @keyframes pop {
   to {
