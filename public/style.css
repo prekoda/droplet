@@ -30,7 +30,7 @@ body.dark {
   --bubble-other: #6D2FC4;  /* fallback for gradient */
   --accent: #4ca3ff;
   --bubble-text: #ffffff;    /* text inside bubbles */
-  --username-color: #CCCCCC; /* username color */
+  --username-color: #000000; /* username color */
 }
 
 /* CHAT APP CONTAINER */
