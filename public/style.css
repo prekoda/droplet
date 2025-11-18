@@ -28,7 +28,7 @@ body.dark {
   --text: #e5e5e5;         /* general text */
   --bubble-me: #2F5EC4;     /* fallback for gradient */
   --bubble-other: #6D2FC4;  /* fallback for gradient */
-  --accent: #4ca3ff;
+  --accent: white;
   --bubble-text: #ffffff;    /* text inside bubbles */
   --username-color: #000000; /* username color */
 }
