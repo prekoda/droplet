@@ -1,8 +1,9 @@
-// ======= Dynamic WebSocket =======
+// ======= WebSocket Setup =======
 const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 const ws = new WebSocket(`${protocol}//${window.location.host}`);
 
 let myUsername = "";
+let replyToMsg = null;
 
 // ======= THEME TOGGLE =======
 const toggleBtn = document.getElementById("themeToggle");
@@ -27,7 +28,7 @@ ws.onmessage = (event) => {
       break;
 
     case "chat":
-      addMessage(data.username, data.message);
+      addMessage(data.username, data.message, data.replyTo, data.time);
       break;
 
     case "users":
@@ -52,22 +53,54 @@ function updateUsersDropdown(users) {
 }
 
 // ======= ADD MESSAGE TO CHAT =======
-function addMessage(name, text) {
+function addMessage(name, text, replyTo = null, time = Date.now()) {
   const container = document.getElementById("messages");
   const div = document.createElement("div");
   div.classList.add("msg");
+  div.dataset.time = time;
+
+  // Add reply preview if exists
+  let replyHtml = "";
+  if (replyTo) {
+    replyHtml = `<div class="reply-preview">Replying to: ${replyTo}</div>`;
+  }
 
   if (name === myUsername) {
     div.classList.add("me");
-    div.textContent = text;
+    div.innerHTML = replyHtml + text;
   } else {
     div.classList.add("other");
-    div.innerHTML = `<span class="name">${name}</span>${text}`;
+    div.innerHTML = replyHtml + `<span class="name">${name}</span>${text}`;
   }
+
+  // Add reply button
+  const replyBtn = document.createElement("span");
+  replyBtn.textContent = "Reply";
+  replyBtn.classList.add("reply-btn");
+  replyBtn.onclick = () => startReply(div, name, text);
+  div.appendChild(replyBtn);
 
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
 }
+
+// ======= REPLY FUNCTIONALITY =======
+const replyPreview = document.getElementById("reply-preview");
+const replyText = document.getElementById("reply-text");
+const cancelReplyBtn = document.getElementById("cancel-reply");
+
+function startReply(msgDiv, name, text) {
+  replyToMsg = text;
+  replyPreview.classList.remove("d-none");
+  replyText.textContent = `${name}: ${text}`;
+  msgInput.focus();
+}
+
+cancelReplyBtn.onclick = () => {
+  replyToMsg = null;
+  replyPreview.classList.add("d-none");
+  replyText.textContent = "";
+};
 
 // ======= SEND MESSAGE =======
 const sendBtn = document.getElementById("sendBtn");
@@ -79,8 +112,11 @@ msgInput.addEventListener("keypress", (e) => {
 });
 
 function sendMsg() {
-  if (!msgInput.value.trim()) return;
-  ws.send(msgInput.value);
+  const msg = msgInput.value.trim();
+  if (!msg) return;
+
+  ws.send(JSON.stringify({ message: msg, replyTo: replyToMsg }));
   msgInput.value = "";
-  msgInput.focus();
+  replyToMsg = null;
+  replyPreview.classList.add("d-none");
 }
