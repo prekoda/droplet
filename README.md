@@ -1,5 +1,5 @@
 # Droplet Chat
-Droplet Chat is a simple real-time web chat application built with Node.js, WebSockets, and plain HTML/CSS/JavaScript. It allows users to chat with randomly generated usernames, switch between light and dark themes, and see the list of users currently online.
+Droplet Chat is a simple real-time web chat application built with Node.js, WebSockets, and plain HTML/CSS/JavaScript. It allows users to chat with randomly generated usernames, switch between light and dark themes, and see the list of users currently online. 
 
 ## Features
 - No login required
@@ -14,3 +14,6 @@ Droplet Chat is a simple real-time web chat application built with Node.js, WebS
 
 ## Link for the website 
 https://droplet-production-aaaf.up.railway.app/
+
+## Contribution
+This project is still in development if anoyone intrested, do contact me or fork this repo to contribute.
