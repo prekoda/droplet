@@ -28,7 +28,7 @@ body.dark {
   --text: #e5e5e5;         /* general text */
   --bubble-me: #2F5EC4;     /* fallback for gradient */
   --bubble-other: #6D2FC4;  /* fallback for gradient */
-  --accent: white;
+  --accent: #2F5EC4;
   --bubble-text: #ffffff;    /* text inside bubbles */
   --username-color: #000000; /* username color */
 }
@@ -133,7 +133,7 @@ body.dark .msg.other {
   font-weight: bold;
   margin-bottom: 5px;
   display: block;
-  color: var(--accent); /* default accent color */
+  color: var(--username-color); /* default username color */
 }
 
 /* DARK MODE USERNAME COLOR */
