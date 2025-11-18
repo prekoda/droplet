@@ -1,25 +1,19 @@
-// Use dynamic WebSocket URL for local or Railway deployment
-const ws = new WebSocket(
-  (location.protocol === "https:" ? "wss://" : "ws://") + location.host
-);
-
+const ws = new WebSocket("ws://localhost:3000");
 let myUsername = "";
 
 // THEME TOGGLE
 const toggleBtn = document.getElementById("themeToggle");
 toggleBtn.onclick = () => {
   if (document.body.classList.contains("light")) {
-    document.body.classList.remove("light");
-    document.body.classList.add("dark");
-    toggleBtn.textContent = "☀️";
+    document.body.classList.replace("light", "dark");
+    toggleBtn.innerHTML = '<i class="bi bi-sun-fill"></i>';
   } else {
-    document.body.classList.remove("dark");
-    document.body.classList.add("light");
-    toggleBtn.textContent = "🌙";
+    document.body.classList.replace("dark", "light");
+    toggleBtn.innerHTML = '<i class="bi bi-moon-fill"></i>';
   }
 };
 
-// Handle incoming messages
+// WebSocket handling
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
 
@@ -32,30 +26,40 @@ ws.onmessage = (event) => {
   if (data.type === "chat") {
     addMessage(data.username, data.message);
   }
+
+  if (data.type === "users") {
+    const usersList = document.getElementById("usersList");
+    usersList.innerHTML = "";
+    data.users.forEach((u) => {
+      const li = document.createElement("li");
+      li.textContent = u;
+      li.className = "dropdown-item";
+      usersList.appendChild(li);
+    });
+  }
 };
 
-// Add a message to the chat container
+// ADD MESSAGE
 function addMessage(name, text) {
   const container = document.getElementById("messages");
-
   const div = document.createElement("div");
   div.classList.add("msg");
 
   if (name === myUsername) {
     div.classList.add("me");
+    div.textContent = text;
   } else {
     div.classList.add("other");
-    div.innerHTML = `<span class="name">${name}</span>`;
+    div.innerHTML = `<span class="name">${name}</span>${text}`;
   }
 
-  div.innerHTML += text;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
 }
 
-// Send message on button click or Enter key
+// SEND MESSAGE
 document.getElementById("sendBtn").onclick = sendMsg;
-document.getElementById("msgInput").addEventListener("keypress", (e) => {
+document.getElementById("msgInput").addEventListener("keypress", e => {
   if (e.key === "Enter") sendMsg();
 });
 
@@ -64,4 +68,5 @@ function sendMsg() {
   if (!input.value.trim()) return;
   ws.send(input.value);
   input.value = "";
+  input.focus();
 }
