@@ -28,15 +28,12 @@ ws.onmessage = (event) => {
       break;
 
     case "chat":
-      addMessage(data.username, data.message, data.replyTo, data.time);
+      addMessage(data.username, data.message, data.replyTo, data.time, data.fileType, data.fileData);
       break;
 
     case "users":
       updateUsersDropdown(data.users);
       break;
-
-    default:
-      console.warn("Unknown message type:", data.type);
   }
 };
 
@@ -44,7 +41,7 @@ ws.onmessage = (event) => {
 function updateUsersDropdown(users) {
   const usersList = document.getElementById("usersList");
   usersList.innerHTML = "";
-  users.forEach((user) => {
+  users.forEach(user => {
     const li = document.createElement("li");
     li.textContent = user;
     li.className = "dropdown-item";
@@ -53,25 +50,25 @@ function updateUsersDropdown(users) {
 }
 
 // ======= ADD MESSAGE TO CHAT =======
-function addMessage(name, text, replyTo = null, time = Date.now()) {
+function addMessage(name, text, replyTo = null, time = Date.now(), fileType = null, fileData = null) {
   const container = document.getElementById("messages");
   const div = document.createElement("div");
   div.classList.add("msg");
   div.dataset.time = time;
 
-  // Add reply preview if exists
   let replyHtml = "";
-  if (replyTo) {
-    replyHtml = `<div class="reply-preview">Replying to: ${replyTo}</div>`;
+  if (replyTo) replyHtml = `<div class="reply-preview">Replying to: ${replyTo}</div>`;
+
+  let contentHtml = "";
+  if (fileType && fileData) {
+    if (fileType.startsWith("image/")) {
+      contentHtml = `<img src="${fileData}" alt="image">`;
+    }
+  } else {
+    contentHtml = name === myUsername ? text : `<span class="name">${name}</span>${text}`;
   }
 
-  if (name === myUsername) {
-    div.classList.add("me");
-    div.innerHTML = replyHtml + text;
-  } else {
-    div.classList.add("other");
-    div.innerHTML = replyHtml + `<span class="name">${name}</span>${text}`;
-  }
+  div.innerHTML = replyHtml + contentHtml;
 
   // Add reply button
   const replyBtn = document.createElement("span");
@@ -80,6 +77,7 @@ function addMessage(name, text, replyTo = null, time = Date.now()) {
   replyBtn.onclick = () => startReply(div, name, text);
   div.appendChild(replyBtn);
 
+  div.classList.add(name === myUsername ? "me" : "other");
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
 }
@@ -88,6 +86,7 @@ function addMessage(name, text, replyTo = null, time = Date.now()) {
 const replyPreview = document.getElementById("reply-preview");
 const replyText = document.getElementById("reply-text");
 const cancelReplyBtn = document.getElementById("cancel-reply");
+const msgInput = document.getElementById("msgInput");
 
 function startReply(msgDiv, name, text) {
   replyToMsg = text;
@@ -102,12 +101,35 @@ cancelReplyBtn.onclick = () => {
   replyText.textContent = "";
 };
 
+// ======= FILE UPLOAD =======
+const attachBtn = document.getElementById("attachBtn");
+const fileInput = document.getElementById("fileInput");
+
+attachBtn.onclick = () => fileInput.click();
+
+fileInput.onchange = () => {
+  const file = fileInput.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    ws.send(JSON.stringify({
+      message: "",
+      replyTo: replyToMsg,
+      fileType: file.type,
+      fileData: reader.result
+    }));
+    replyToMsg = null;
+    replyPreview.classList.add("d-none");
+    fileInput.value = "";
+  };
+  reader.readAsDataURL(file);
+};
+
 // ======= SEND MESSAGE =======
 const sendBtn = document.getElementById("sendBtn");
-const msgInput = document.getElementById("msgInput");
-
 sendBtn.onclick = sendMsg;
-msgInput.addEventListener("keypress", (e) => {
+msgInput.addEventListener("keypress", e => {
   if (e.key === "Enter") sendMsg();
 });
 
