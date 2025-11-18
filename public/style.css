@@ -1,12 +1,14 @@
+/* GLOBAL STYLES */
 body {
   font-family: "Inter", Arial, sans-serif;
   margin: 0;
-  height: 100vh;
+  min-height: 100vh;
   background: var(--bg);
   display: flex;
   justify-content: center;
   align-items: center;
   transition: 0.3s ease;
+  box-sizing: border-box;
 }
 
 /* LIGHT THEME */
@@ -23,13 +25,15 @@ body.light {
 body.dark {
   --bg: #121212;
   --bg2: #1e1e1e;
-  --text: #e5e5e5;
-  --bubble-me: #2F5EC4;
-  --bubble-other: #6D2FC4;
+  --text: #e5e5e5;         /* general text */
+  --bubble-me: #2F5EC4;     /* fallback for gradient */
+  --bubble-other: #6D2FC4;  /* fallback for gradient */
   --accent: #4ca3ff;
+  --bubble-text: #ffffff;    /* text inside bubbles */
+  --username-color: #CCCCCC; /* username color */
 }
 
-
+/* CHAT APP CONTAINER */
 #chat-app {
   width: 420px;
   height: 620px;
@@ -40,6 +44,8 @@ body.dark {
   overflow: hidden;
   box-shadow: 0 6px 25px rgba(0,0,0,0.25);
 }
+
+/* HEADER */
 #header {
   padding: 14px 18px;
   background: var(--bg2);
@@ -69,20 +75,7 @@ body.dark {
   color: var(--text);
 }
 
-#username {
-  color: var(--text); /* Uses the text color from your theme */
-}
-/* LIGHT THEME */
-body.light {
-  --text: black;
-}
-
-/* DARK THEME */
-body.dark {
-  --text: white;
-}
-
-
+/* MESSAGES AREA */
 #messages {
   flex: 1;
   padding: 15px;
@@ -109,25 +102,46 @@ body.dark {
   }
 }
 
-.msg.me {
+/* MESSAGE BUBBLES - LIGHT MODE */
+body.light .msg.me {
   background: var(--bubble-me);
   margin-left: auto;
-  font-color: var(--text)
+  color: var(--text);
 }
 
-.msg.other {
+body.light .msg.other {
   background: var(--bubble-other);
   margin-right: auto;
-  font-color: var(--text)
-  
+  color: var(--text);
 }
 
+/* MESSAGE BUBBLES - DARK MODE WITH GRADIENTS */
+body.dark .msg.me {
+  background: linear-gradient(135deg, #2F5EC4, #4CA3FF);
+  margin-left: auto;
+  color: var(--bubble-text);
+}
+
+body.dark .msg.other {
+  background: linear-gradient(135deg, #6D2FC4, #9B59B6);
+  margin-right: auto;
+  color: var(--bubble-text);
+}
+
+/* USERNAME */
 .msg .name {
   font-weight: bold;
   margin-bottom: 5px;
   display: block;
-  color: var(--accent);
+  color: var(--accent); /* default accent color */
 }
+
+/* DARK MODE USERNAME COLOR */
+body.dark .msg .name {
+  color: var(--username-color);
+}
+
+/* INPUT AREA */
 #input-area {
   display: flex;
   background: var(--bg2);
@@ -145,6 +159,11 @@ body.dark {
   outline: none;
 }
 
+#msgInput::placeholder {
+  color: rgba(128,128,128,0.6);
+}
+
+/* SEND BUTTON */
 #sendBtn {
   margin-left: 10px;
   padding: 12px 16px;
@@ -160,4 +179,3 @@ body.dark {
 #sendBtn:hover {
   opacity: 0.8;
 }
-
