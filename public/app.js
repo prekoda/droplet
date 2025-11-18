@@ -1,4 +1,8 @@
-const ws = new WebSocket("ws://localhost:3000");
+// Use dynamic WebSocket URL for local or Railway deployment
+const ws = new WebSocket(
+  (location.protocol === "https:" ? "wss://" : "ws://") + location.host
+);
+
 let myUsername = "";
 
 // THEME TOGGLE
@@ -15,6 +19,7 @@ toggleBtn.onclick = () => {
   }
 };
 
+// Handle incoming messages
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
 
@@ -29,6 +34,7 @@ ws.onmessage = (event) => {
   }
 };
 
+// Add a message to the chat container
 function addMessage(name, text) {
   const container = document.getElementById("messages");
 
@@ -47,8 +53,9 @@ function addMessage(name, text) {
   container.scrollTop = container.scrollHeight;
 }
 
+// Send message on button click or Enter key
 document.getElementById("sendBtn").onclick = sendMsg;
-document.getElementById("msgInput").addEventListener("keypress", e => {
+document.getElementById("msgInput").addEventListener("keypress", (e) => {
   if (e.key === "Enter") sendMsg();
 });
 
