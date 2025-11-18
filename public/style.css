@@ -24,8 +24,8 @@ body.dark {
   --bg: #121212;
   --bg2: #1e1e1e;
   --text: #e5e5e5;
-  --bubble-me: #0059c9;
-  --bubble-other: #2b2b2b;
+  --bubble-me: #2F5EC4;
+  --bubble-other: #6D2FC4;
   --accent: #4ca3ff;
 }
 
@@ -112,11 +112,14 @@ body.dark {
 .msg.me {
   background: var(--bubble-me);
   margin-left: auto;
+  font-color: var(--text)
 }
 
 .msg.other {
   background: var(--bubble-other);
   margin-right: auto;
+  font-color: var(--text)
+  
 }
 
 .msg .name {
