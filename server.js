@@ -33,7 +33,7 @@ const server = http.createServer((req, res) => {
 // WebSocket server
 const wss = new WebSocket.Server({ server });
 
-// random username generator
+// Random username generator
 function generateName() {
   const colors = ["Red", "Green", "Blue", "Yellow", "Purple", "Aqua"];
   const animals = ["Fox", "Bear", "Wolf", "Panda", "Eagle", "Hawk"];
@@ -45,7 +45,7 @@ function generateName() {
   );
 }
 
-// Keep track of connected users
+// Track connected users
 const users = new Map();
 
 function broadcastUsers() {
@@ -62,21 +62,31 @@ wss.on("connection", (ws) => {
   const username = generateName();
   users.set(ws, username);
 
+  // Send welcome
   ws.send(JSON.stringify({ type: "welcome", username }));
   broadcastUsers();
 
   ws.on("message", (msg) => {
-    const payload = JSON.stringify({
+    let data;
+    try {
+      data = JSON.parse(msg.toString());
+    } catch {
+      console.error("Invalid message format:", msg.toString());
+      return;
+    }
+
+    const payload = {
       type: "chat",
       username,
-      message: msg.toString(),
+      message: data.message,
+      replyTo: data.replyTo || null,
       time: Date.now()
-    });
+    };
 
-    // broadcast to all users
+    // Broadcast to all users
     wss.clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
-        client.send(payload);
+        client.send(JSON.stringify(payload));
       }
     });
   });
@@ -87,7 +97,7 @@ wss.on("connection", (ws) => {
   });
 });
 
-// Listen publicly
+// Start server
 server.listen(3000, "0.0.0.0", () => {
   console.log("Chat server running on http://0.0.0.0:3000");
 });
