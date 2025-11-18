@@ -2,7 +2,6 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const WebSocket = require("ws");
-const crypto = require("crypto");
 
 // Serve frontend files
 const server = http.createServer((req, res) => {
@@ -46,10 +45,25 @@ function generateName() {
   );
 }
 
+// Keep track of connected users
+const users = new Map();
+
+function broadcastUsers() {
+  const userList = Array.from(users.values());
+  const payload = JSON.stringify({ type: "users", users: userList });
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(payload);
+    }
+  });
+}
+
 wss.on("connection", (ws) => {
   const username = generateName();
+  users.set(ws, username);
 
   ws.send(JSON.stringify({ type: "welcome", username }));
+  broadcastUsers();
 
   ws.on("message", (msg) => {
     const payload = JSON.stringify({
@@ -66,10 +80,14 @@ wss.on("connection", (ws) => {
       }
     });
   });
+
+  ws.on("close", () => {
+    users.delete(ws);
+    broadcastUsers();
+  });
 });
 
 // Listen publicly
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, "0.0.0.0", () => {
-  console.log("Server running on port " + PORT);
+server.listen(3000, "0.0.0.0", () => {
+  console.log("Chat server running on http://0.0.0.0:3000");
 });
