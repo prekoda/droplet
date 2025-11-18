@@ -2,28 +2,63 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Drop Chat</title>
+  <title>Droplet Chat</title>
+  
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png">
+
+  <!-- Bootstrap CSS & Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+
+  <!-- Custom CSS -->
   <link rel="stylesheet" href="style.css">
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body class="light">
 
 <div id="chat-app">
+  <!-- HEADER -->
   <div id="header">
-    <h2>Drop Chat</h2>
-    <div id="right-controls">
-      <button id="themeToggle">🌙</button>
-      <span id="username"></span>
+    <h2>Droplet Chat</h2>
+    <div id="right-controls" class="d-flex align-items-center gap-2">
+      <!-- Theme Toggle -->
+      <button id="themeToggle" class="btn btn-outline-secondary btn-sm"><i class="bi bi-moon-fill"></i></button>
+
+      <!-- Online Users Dropdown -->
+      <div class="dropdown">
+        <button class="btn btn-outline-secondary btn-sm dropdown-toggle" id="usersToggle" data-bs-toggle="dropdown" aria-expanded="false">
+          <i class="bi bi-people-fill"></i>
+        </button>
+        <ul id="usersList" class="dropdown-menu"></ul>
+      </div>
+
+      <!-- Current Username -->
+      <span id="username" class="ms-2 fw-bold"></span>
     </div>
   </div>
 
+  <!-- MESSAGES -->
   <div id="messages"></div>
 
+  <!-- INPUT AREA -->
   <div id="input-area">
     <input id="msgInput" type="text" placeholder="Type a message..." autofocus>
-    <button id="sendBtn">➤</button>
+    <button id="sendBtn"><i class="bi bi-send-fill"></i></button>
   </div>
 </div>
 
+<!-- WATERMARK -->
+<div id="watermark">
+  <a href="https://github.com/prxcode" target="_blank">Developed by prxcode 2025</a>
+</div>
+
+<!-- Bootstrap JS Bundle -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- App JS -->
 <script src="app.js"></script>
+
 </body>
 </html>
