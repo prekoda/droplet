@@ -25,7 +25,7 @@ body.dark {
   --bg2: #1e1e1e;
   --text: #e5e5e5;
   --bubble-me: #0059c9;
-  --bubble-other: white;
+  --bubble-other: #2b2b2b;
   --accent: #4ca3ff;
 }
 
@@ -67,6 +67,19 @@ body.dark {
   font-size: 20px;
   cursor: pointer;
   color: var(--text);
+}
+
+#username {
+  color: var(--text); /* Uses the text color from your theme */
+}
+/* LIGHT THEME */
+body.light {
+  --text: black;
+}
+
+/* DARK THEME */
+body.dark {
+  --text: white;
 }
 
 
