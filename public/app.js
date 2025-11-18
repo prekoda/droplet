@@ -1,7 +1,10 @@
-const ws = new WebSocket("ws://localhost:3000");
+// ======= Dynamic WebSocket =======
+const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+const ws = new WebSocket(`${protocol}//${window.location.host}`);
+
 let myUsername = "";
 
-// THEME TOGGLE
+// ======= THEME TOGGLE =======
 const toggleBtn = document.getElementById("themeToggle");
 toggleBtn.onclick = () => {
   if (document.body.classList.contains("light")) {
@@ -13,33 +16,42 @@ toggleBtn.onclick = () => {
   }
 };
 
-// WebSocket handling
+// ======= HANDLE WEBSOCKET MESSAGES =======
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
 
-  if (data.type === "welcome") {
-    myUsername = data.username;
-    document.getElementById("username").innerText = myUsername;
-    return;
-  }
+  switch (data.type) {
+    case "welcome":
+      myUsername = data.username;
+      document.getElementById("username").innerText = myUsername;
+      break;
 
-  if (data.type === "chat") {
-    addMessage(data.username, data.message);
-  }
+    case "chat":
+      addMessage(data.username, data.message);
+      break;
 
-  if (data.type === "users") {
-    const usersList = document.getElementById("usersList");
-    usersList.innerHTML = "";
-    data.users.forEach((u) => {
-      const li = document.createElement("li");
-      li.textContent = u;
-      li.className = "dropdown-item";
-      usersList.appendChild(li);
-    });
+    case "users":
+      updateUsersDropdown(data.users);
+      break;
+
+    default:
+      console.warn("Unknown message type:", data.type);
   }
 };
 
-// ADD MESSAGE
+// ======= UPDATE ONLINE USERS DROPDOWN =======
+function updateUsersDropdown(users) {
+  const usersList = document.getElementById("usersList");
+  usersList.innerHTML = "";
+  users.forEach((user) => {
+    const li = document.createElement("li");
+    li.textContent = user;
+    li.className = "dropdown-item";
+    usersList.appendChild(li);
+  });
+}
+
+// ======= ADD MESSAGE TO CHAT =======
 function addMessage(name, text) {
   const container = document.getElementById("messages");
   const div = document.createElement("div");
@@ -57,16 +69,18 @@ function addMessage(name, text) {
   container.scrollTop = container.scrollHeight;
 }
 
-// SEND MESSAGE
-document.getElementById("sendBtn").onclick = sendMsg;
-document.getElementById("msgInput").addEventListener("keypress", e => {
+// ======= SEND MESSAGE =======
+const sendBtn = document.getElementById("sendBtn");
+const msgInput = document.getElementById("msgInput");
+
+sendBtn.onclick = sendMsg;
+msgInput.addEventListener("keypress", (e) => {
   if (e.key === "Enter") sendMsg();
 });
 
 function sendMsg() {
-  const input = document.getElementById("msgInput");
-  if (!input.value.trim()) return;
-  ws.send(input.value);
-  input.value = "";
-  input.focus();
+  if (!msgInput.value.trim()) return;
+  ws.send(msgInput.value);
+  msgInput.value = "";
+  msgInput.focus();
 }
