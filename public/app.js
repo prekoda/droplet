@@ -27,7 +27,11 @@ ws.onmessage = (event) => {
       break;
 
     case "chat":
-      addMessage(data.username, data.message, data.replyTo, data.time, data.fileType, data.fileData);
+      addMessage(data.username, data.message, data.replyTo, data.time, data.fileType, data.fileData, data.reactions || {});
+      break;
+
+    case "reaction":
+      updateReaction(data.time, data.emoji);
       break;
 
     case "users":
@@ -49,7 +53,7 @@ function updateUsersDropdown(users) {
 }
 
 // ======= ADD MESSAGE TO CHAT =======
-function addMessage(name, text, replyTo = null, time = Date.now(), fileType = null, fileData = null) {
+function addMessage(name, text, replyTo = null, time = Date.now(), fileType = null, fileData = null, reactions = {}) {
   const container = document.getElementById("messages");
   const div = document.createElement("div");
   div.classList.add("msg");
@@ -75,6 +79,23 @@ function addMessage(name, text, replyTo = null, time = Date.now(), fileType = nu
   replyBtn.classList.add("reply-btn");
   replyBtn.onclick = () => startReply(div, name, text);
   div.appendChild(replyBtn);
+
+  // Add reactions container
+  const reactionsDiv = document.createElement("div");
+  reactionsDiv.classList.add("reactions");
+  const defaultEmojis = ["👍", "❤️", "😂", "😮", "😢", "👎"];
+
+  defaultEmojis.forEach(emoji => {
+    const span = document.createElement("span");
+    const count = reactions[emoji] || 0;
+    span.textContent = count > 0 ? `${emoji} ${count}` : emoji;
+    span.classList.add("reaction");
+    span.dataset.count = count;
+    span.onclick = () => reactToMessage(div, emoji);
+    reactionsDiv.appendChild(span);
+  });
+
+  div.appendChild(reactionsDiv);
 
   div.classList.add(name === myUsername ? "me" : "other");
   container.appendChild(div);
@@ -140,4 +161,35 @@ function sendMsg() {
   msgInput.value = "";
   replyToMsg = null;
   replyPreview.classList.add("d-none");
+}
+
+// ======= REACTIONS =======
+function reactToMessage(msgDiv, emoji) {
+  // Update locally
+  const reactions = msgDiv.querySelectorAll(".reaction");
+  reactions.forEach(r => {
+    if (r.textContent.startsWith(emoji)) {
+      let count = parseInt(r.dataset.count || "0") + 1;
+      r.dataset.count = count;
+      r.textContent = `${emoji} ${count}`;
+    }
+  });
+
+  // Send to server
+  const time = msgDiv.dataset.time;
+  ws.send(JSON.stringify({ type: "reaction", time, emoji }));
+}
+
+function updateReaction(time, emoji) {
+  const msgDiv = Array.from(document.querySelectorAll(".msg")).find(m => m.dataset.time == time);
+  if (!msgDiv) return;
+
+  const reactions = msgDiv.querySelectorAll(".reaction");
+  reactions.forEach(r => {
+    if (r.textContent.startsWith(emoji)) {
+      let count = parseInt(r.dataset.count || "0") + 1;
+      r.dataset.count = count;
+      r.textContent = `${emoji} ${count}`;
+    }
+  });
 }
