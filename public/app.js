@@ -1,5 +1,5 @@
 // ======= WebSocket Setup =======
-const ws = new WebSocket("ws://localhost:3000"); // change to your server if deployed
+const ws = new WebSocket("wss://droplet-production-aaaf.up.railway.app");
 
 let myUsername = "";
 let replyToMsg = null;
