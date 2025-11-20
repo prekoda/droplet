@@ -8,13 +8,17 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body class="light">
+</head><body class="light">
 
 <div id="chat-app">
   <!-- HEADER -->
-  <div id="header">
-    <h2>Droplet Chat</h2>
+  <div id="header" class="d-flex justify-content-between align-items-center px-3 py-2">
+    <div class="d-flex align-items-center gap-3">
+      <button id="togglePrivateBtn" class="btn btn-outline-primary btn-sm" title="Toggle Private Chats">
+        ☰
+      </button>
+      <h2 class="mb-0">Droplet Chat</h2>
+    </div>
     <div id="right-controls" class="d-flex align-items-center gap-2">
       <button id="themeToggle" class="btn btn-outline-secondary btn-sm"><i class="bi bi-moon-fill"></i></button>
       <div class="dropdown">
@@ -27,33 +31,35 @@
     </div>
   </div>
 
-  <!-- MAIN CONTENT: LEFT DMs | RIGHT GROUP CHAT -->
-  <div id="main-content" class="d-flex" style="flex:1; height:calc(100% - 60px);">
-    
-    <!-- LEFT: Private DM container -->
-    <div id="dm-container" class="border-end">
-      <!-- DM chat windows will be added dynamically here -->
+  <div id="main-container" class="d-flex flex-grow-1 overflow-hidden">
+    <!-- PRIVATE CHATS PANEL -->
+    <div id="private-chat-panel" class="d-flex flex-column bg-light border-end" style="width: 280px; min-width: 280px; transition: width 0.3s;">
+      <h5 class="p-3 border-bottom">Private Chats</h5>
+      <div id="privateChatsList" class="flex-grow-1 overflow-auto px-2">
+        <!-- Private chat buttons will be added here -->
+      </div>
     </div>
 
-    <!-- RIGHT: Group chat -->
-    <div id="group-chat" class="flex-fill d-flex flex-column">
-      <div id="group-header" class="p-2 border-bottom text-center fw-bold">
+    <!-- MAIN GROUP CHAT -->
+    <div id="group-chat-container" class="d-flex flex-column flex-grow-1">
+      <div id="group-chat-header" class="p-3 border-bottom bg-white text-center fw-bold">
         Droplet Group Chat
       </div>
-      <div id="messages" class="flex-fill overflow-auto p-2"></div>
-      <div id="input-area">
-        <div id="reply-preview" class="d-none">
+
+      <div id="messages" class="flex-grow-1 overflow-auto p-3" style="background: var(--bg); scroll-behavior: smooth;"></div>
+
+      <div id="input-area" class="p-3 border-top bg-white">
+        <div id="reply-preview" class="d-none mb-2">
           Replying to: <span id="reply-text"></span> <button id="cancel-reply" class="btn btn-sm btn-danger ms-2">×</button>
         </div>
         <div class="d-flex gap-2">
-          <input id="msgInput" type="text" placeholder="Type a message..." autofocus>
+          <input id="msgInput" type="text" class="form-control" placeholder="Type a message..." autofocus>
           <input type="file" id="fileInput" accept="image/*" style="display:none;">
           <button id="attachBtn" class="btn btn-outline-secondary"><i class="bi bi-paperclip"></i></button>
           <button id="sendBtn" class="btn btn-primary"><i class="bi bi-send-fill"></i></button>
         </div>
       </div>
     </div>
-
   </div>
 </div>
 
