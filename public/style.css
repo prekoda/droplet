@@ -32,6 +32,41 @@ body.dark {
   --bubble-text: #ffffff;
   --username-color: #CCCCCC;
 }
+#main-content {
+  display: flex;
+  height: 100%;
+}
+
+#dm-container {
+  width: 250px;
+  border-right: 1px solid rgba(128,128,128,0.3);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.dm-window {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid rgba(128,128,128,0.2);
+  margin-bottom: 5px;
+  height: 250px;
+}
+
+.dm-header {
+  background: var(--bg2);
+  padding: 5px;
+  font-weight: bold;
+  border-bottom: 1px solid rgba(128,128,128,0.2);
+  text-align: center;
+}
+
+.dm-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 5px;
+  background: var(--bg);
+}
 
 /* CHAT APP CONTAINER */
 #chat-app {
