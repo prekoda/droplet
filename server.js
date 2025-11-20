@@ -18,7 +18,6 @@ const server = http.createServer((req, res) => {
       ".css": "text/css",
       ".js": "application/javascript",
       ".png": "image/png",
-      ".jpg": "image/jpeg",
       ".ico": "image/x-icon"
     };
     res.writeHead(200, { "Content-Type": types[ext] || "text/plain" });
@@ -38,9 +37,9 @@ function generateName() {
          "-" + Math.floor(Math.random() * 9999);
 }
 
-// Track connected users and messages
+// Track users and messages
 const users = new Map();
-const messages = []; // store messages with reactions
+const messages = []; // each message: {username, message, time, fileType, fileData, reactions:{username:emoji}}
 
 function broadcastUsers() {
   const userList = Array.from(users.values());
@@ -54,13 +53,10 @@ wss.on("connection", ws => {
   const username = generateName();
   users.set(ws, username);
 
-  // Send welcome
   ws.send(JSON.stringify({ type: "welcome", username }));
 
-  // Send all existing messages to new client
-  messages.forEach(msg => {
-    ws.send(JSON.stringify(msg));
-  });
+  // Send all previous messages to new client
+  messages.forEach(msg => ws.send(JSON.stringify(msg)));
 
   broadcastUsers();
 
@@ -68,14 +64,15 @@ wss.on("connection", ws => {
     let data;
     try { data = JSON.parse(msg.toString()); } catch { return; }
 
+    // Handle reaction
     if (data.type === "reaction") {
-      // Update the corresponding message reactions
       const target = messages.find(m => m.time == data.time);
       if (target) {
-        target.reactions[data.emoji] = (target.reactions[data.emoji] || 0) + 1;
+        // Replace previous reaction of this user
+        target.reactions[username] = data.emoji;
 
-        // Broadcast reaction to all clients
-        const payload = { type: "reaction", time: data.time, emoji: data.emoji };
+        // Broadcast updated reactions to all clients
+        const payload = { type: "reaction-update", time: target.time, reactions: target.reactions };
         wss.clients.forEach(client => {
           if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(payload));
         });
@@ -92,10 +89,10 @@ wss.on("connection", ws => {
       time: Date.now(),
       fileType: data.fileType || null,
       fileData: data.fileData || null,
-      reactions: {} // start empty
+      reactions: {} // store per-user reactions
     };
 
-    messages.push(payload); // store message
+    messages.push(payload);
 
     wss.clients.forEach(client => {
       if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(payload));
