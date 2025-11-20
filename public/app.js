@@ -2,35 +2,43 @@ const ws = new WebSocket("wss://droplet-production-aaaf.up.railway.app");
 
 let myUsername = "";
 let replyToMsg = null;
+let currentChatUser = null; // null = group, otherwise username
 
 // ======= THEME TOGGLE =======
 const toggleBtn = document.getElementById("themeToggle");
 toggleBtn.onclick = () => {
-  if (document.body.classList.contains("light")) {
-    document.body.classList.replace("light", "dark");
-    toggleBtn.innerHTML = '<i class="bi bi-sun-fill"></i>';
+  if(document.body.classList.contains("light")){
+    document.body.classList.replace("light","dark");
+    toggleBtn.innerHTML='<i class="bi bi-sun-fill"></i>';
   } else {
-    document.body.classList.replace("dark", "light");
-    toggleBtn.innerHTML = '<i class="bi bi-moon-fill"></i>';
+    document.body.classList.replace("dark","light");
+    toggleBtn.innerHTML='<i class="bi bi-moon-fill"></i>';
   }
 };
 
-// ======= WEBSOCKET HANDLING =======
-ws.onmessage = (event) => {
+// ======= WEBSOCKET =======
+ws.onmessage = (event)=>{
   const data = JSON.parse(event.data);
 
-  switch (data.type) {
+  switch(data.type){
     case "welcome":
       myUsername = data.username;
       document.getElementById("username").innerText = myUsername;
       break;
 
     case "chat":
-      addMessage(data.username, data.message, data.replyTo, data.time, data.fileType, data.fileData, data.reactions || {});
+      if(currentChatUser===null) addMessage(data.username,data.message,data.replyTo,data.time,data.fileType,data.fileData,data.reactions||{});
+      break;
+
+    case "dm":
+      // Only show if DM matches current chat
+      if(currentChatUser===data.from || currentChatUser===data.to){
+        addDMMessage(data);
+      }
       break;
 
     case "reaction-update":
-      updateReactions(data.time, data.reactions);
+      updateReactions(data.time,data.reactions);
       break;
 
     case "users":
@@ -40,144 +48,131 @@ ws.onmessage = (event) => {
 };
 
 // ======= USERS DROPDOWN =======
-function updateUsersDropdown(users) {
+function updateUsersDropdown(users){
   const usersList = document.getElementById("usersList");
-  usersList.innerHTML = "";
-  users.forEach(user => {
-    const li = document.createElement("li");
-    li.textContent = user;
-    li.className = "dropdown-item";
+  usersList.innerHTML="";
+  users.forEach(user=>{
+    const li=document.createElement("li");
+    li.textContent=user;
+    li.className="dropdown-item";
+    li.onclick=()=>startPrivateChat(user);
     usersList.appendChild(li);
   });
 }
 
-// ======= ADD MESSAGE =======
-function addMessage(name, text, replyTo = null, time = Date.now(), fileType = null, fileData = null, reactions = {}) {
-  const container = document.getElementById("messages");
-  const div = document.createElement("div");
-  div.classList.add("msg");
-  div.dataset.time = time;
+// ======= START PRIVATE CHAT =======
+function startPrivateChat(user){
+  currentChatUser = user;
+  document.getElementById("messages").innerHTML="";
+  document.getElementById("reply-preview").classList.add("d-none");
+}
 
-  let replyHtml = replyTo ? `<div class="reply-preview">Replying to: ${replyTo}</div>` : "";
+// ======= SEND MESSAGE =======
+const msgInput=document.getElementById("msgInput");
+const sendBtn=document.getElementById("sendBtn");
+sendBtn.onclick=sendMsg;
+msgInput.addEventListener("keypress",e=>{if(e.key==="Enter")sendMsg();});
 
-  let contentHtml = "";
-  if (fileType && fileData && fileType.startsWith("image/")) {
-    contentHtml = `<img src="${fileData}" alt="image">`;
+function sendMsg(){
+  const msg=msgInput.value.trim();
+  if(!msg) return;
+
+  if(currentChatUser){
+    ws.send(JSON.stringify({ type:"dm", to: currentChatUser, message: msg }));
   } else {
-    contentHtml = name === myUsername ? text : `<span class="name">${name}</span>${text}`;
+    ws.send(JSON.stringify({ type:"chat", message: msg, replyTo: replyToMsg }));
   }
+  msgInput.value="";
+  replyToMsg=null;
+  document.getElementById("reply-preview").classList.add("d-none");
+}
 
-  div.innerHTML = replyHtml + contentHtml;
+// ======= ADD GROUP MESSAGE =======
+function addMessage(name,text,replyTo=null,time=Date.now(),fileType=null,fileData=null,reactions={}){
+  const container=document.getElementById("messages");
+  const div=document.createElement("div");
+  div.classList.add("msg");
+  div.dataset.time=time;
+
+  let replyHtml=replyTo?`<div class="reply-preview">Replying to: ${replyTo}</div>`:"";
+  let contentHtml="";
+  if(fileType && fileData && fileType.startsWith("image/")) contentHtml=`<img src="${fileData}" alt="image">`;
+  else contentHtml=name===myUsername?text:`<span class="name">${name}</span>${text}`;
+
+  div.innerHTML=replyHtml+contentHtml;
 
   // Reply button
-  const replyBtn = document.createElement("span");
-  replyBtn.textContent = "Reply";
+  const replyBtn=document.createElement("span");
+  replyBtn.textContent="Reply";
   replyBtn.classList.add("reply-btn");
-  replyBtn.onclick = () => startReply(div, name, text);
+  replyBtn.onclick=()=>startReply(div,name,text);
   div.appendChild(replyBtn);
 
   // Reactions
-  const reactionsDiv = document.createElement("div");
+  const reactionsDiv=document.createElement("div");
   reactionsDiv.classList.add("reactions");
-  const emojis = ["👍", "❤️", "😂", "😮", "😢", "👎"];
-
-  emojis.forEach(emoji => {
-    const span = document.createElement("span");
-    const count = Object.values(reactions).filter(v => v === emoji).length;
-    span.textContent = count > 0 ? `${emoji} ${count}` : emoji;
+  const emojis=["👍","❤️","😂","😮","😢","👎"];
+  emojis.forEach(emoji=>{
+    const count=Object.values(reactions).filter(v=>v===emoji).length;
+    const span=document.createElement("span");
+    span.textContent=count>0?`${emoji} ${count}`:emoji;
     span.classList.add("reaction");
-    span.onclick = () => reactToMessage(div, emoji);
+    span.onclick=()=>reactToMessage(div,emoji);
     reactionsDiv.appendChild(span);
   });
-
   div.appendChild(reactionsDiv);
-  div.classList.add(name === myUsername ? "me" : "other");
+
+  div.classList.add(name===myUsername?"me":"other");
   container.appendChild(div);
-  container.scrollTop = container.scrollHeight;
+  container.scrollTop=container.scrollHeight;
 }
 
-// ======= REPLY FUNCTIONALITY =======
-const replyPreview = document.getElementById("reply-preview");
-const replyText = document.getElementById("reply-text");
-const cancelReplyBtn = document.getElementById("cancel-reply");
-const msgInput = document.getElementById("msgInput");
+// ======= ADD DM MESSAGE =======
+function addDMMessage(data){
+  const container=document.getElementById("messages");
+  const div=document.createElement("div");
+  div.classList.add("msg");
+  div.innerHTML=`<span class="name">${data.from} → ${data.to}</span>: ${data.message}`;
+  div.classList.add(data.from===myUsername?"me":"other");
+  container.appendChild(div);
+  container.scrollTop=container.scrollHeight;
+}
 
-function startReply(msgDiv, name, text) {
-  replyToMsg = text;
+// ======= REPLY =======
+const replyPreview=document.getElementById("reply-preview");
+const replyText=document.getElementById("reply-text");
+
+function startReply(msgDiv,name,text){
+  replyToMsg=text;
   replyPreview.classList.remove("d-none");
-  replyText.textContent = `${name}: ${text}`;
+  replyText.textContent=`${name}: ${text}`;
   msgInput.focus();
 }
 
-cancelReplyBtn.onclick = () => {
-  replyToMsg = null;
+document.getElementById("cancel-reply").onclick=()=>{
+  replyToMsg=null;
   replyPreview.classList.add("d-none");
-  replyText.textContent = "";
-};
-
-// ======= FILE UPLOAD =======
-const attachBtn = document.getElementById("attachBtn");
-const fileInput = document.getElementById("fileInput");
-
-attachBtn.onclick = () => fileInput.click();
-
-fileInput.onchange = () => {
-  const file = fileInput.files[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = () => {
-    ws.send(JSON.stringify({
-      message: "",
-      replyTo: replyToMsg,
-      fileType: file.type,
-      fileData: reader.result
-    }));
-    replyToMsg = null;
-    replyPreview.classList.add("d-none");
-    fileInput.value = "";
-  };
-  reader.readAsDataURL(file);
-};
-
-// ======= SEND MESSAGE =======
-const sendBtn = document.getElementById("sendBtn");
-sendBtn.onclick = sendMsg;
-msgInput.addEventListener("keypress", e => {
-  if (e.key === "Enter") sendMsg();
-});
-
-function sendMsg() {
-  const msg = msgInput.value.trim();
-  if (!msg) return;
-  ws.send(JSON.stringify({ message: msg, replyTo: replyToMsg }));
-  msgInput.value = "";
-  replyToMsg = null;
-  replyPreview.classList.add("d-none");
+  replyText.textContent="";
 }
 
 // ======= REACTIONS =======
-function reactToMessage(msgDiv, emoji) {
-  const time = msgDiv.dataset.time;
-  ws.send(JSON.stringify({ type: "reaction", time, emoji }));
+function reactToMessage(msgDiv,emoji){
+  const time=msgDiv.dataset.time;
+  ws.send(JSON.stringify({ type:"reaction", time, emoji }));
 }
 
-function updateReactions(time, reactions) {
-  const msgDiv = Array.from(document.querySelectorAll(".msg")).find(m => m.dataset.time == time);
-  if (!msgDiv) return;
-
-  const reactionsDiv = msgDiv.querySelector(".reactions");
-  const emojis = ["👍", "❤️", "😂", "😮", "😢", "👎"];
-
-  // Clear old reactions
-  reactionsDiv.innerHTML = "";
-
-  emojis.forEach(emoji => {
-    const count = Object.values(reactions).filter(v => v === emoji).length;
-    const span = document.createElement("span");
-    span.textContent = count > 0 ? `${emoji} ${count}` : emoji;
+function updateReactions(time,reactions){
+  const msgDiv=Array.from(document.querySelectorAll(".msg")).find(m=>m.dataset.time==time);
+  if(!msgDiv) return;
+  const reactionsDiv=msgDiv.querySelector(".reactions");
+  const emojis=["👍","❤️","😂","😮","😢","👎"];
+  reactionsDiv.innerHTML="";
+  emojis.forEach(emoji=>{
+    const count=Object.values(reactions).filter(v=>v===emoji).length;
+    const span=document.createElement("span");
+    span.textContent=count>0?`${emoji} ${count}`:emoji;
     span.classList.add("reaction");
-    span.onclick = () => reactToMessage(msgDiv, emoji);
+    span.onclick=()=>reactToMessage(msgDiv,emoji);
     reactionsDiv.appendChild(span);
   });
 }
