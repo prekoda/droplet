@@ -58,6 +58,14 @@ wss.on("connection", ws => {
   // Send previous group messages
   messages.forEach(msg => ws.send(JSON.stringify(msg)));
 
+  // Send previous private messages for each pair
+  privateMessages.forEach((msgs, key) => {
+    const [userA, userB] = key.split("|");
+    if(userA === username || userB === username){
+      msgs.forEach(m => ws.send(JSON.stringify(m)));
+    }
+  });
+
   broadcastUsers();
 
   ws.on("message", msg => {
@@ -66,22 +74,27 @@ wss.on("connection", ws => {
 
     // ====== Private DM ======
     if(data.type==="dm" && data.to) {
-      const recipient = [...users.entries()].find(([sock,u])=>u===data.to);
-      if(!recipient) return; // recipient offline
+      const recipientEntry = [...users.entries()].find(([sock,u])=>u===data.to);
+      if(!recipientEntry) return; // recipient offline
+
       const payload = {
         type:"dm",
         from: username,
         to: data.to,
         message: data.message,
-        time: Date.now()
+        replyTo: data.replyTo||null,
+        time: Date.now(),
+        fileType: data.fileType||null,
+        fileData: data.fileData||null
       };
+
       // Store in map
       const key = getDMKey(username, data.to);
       if(!privateMessages.has(key)) privateMessages.set(key, []);
       privateMessages.get(key).push(payload);
 
       // Send only to sender and recipient
-      [ws, recipient[0]].forEach(client => {
+      [ws, recipientEntry[0]].forEach(client => {
         if(client.readyState===WebSocket.OPEN) client.send(JSON.stringify(payload));
       });
       return;
