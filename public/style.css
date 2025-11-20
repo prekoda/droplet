@@ -67,6 +67,22 @@ body.dark {
   padding: 5px;
   background: var(--bg);
 }
+#main-container {
+  height: calc(100% - 60px); /* header height */
+}
+
+#private-chat-panel.collapsed {
+  width: 0 !important;
+  min-width: 0 !important;
+  overflow: hidden;
+}
+
+#privateChatsList button {
+  width: 100%;
+  text-align: left;
+  margin-bottom: 6px;
+}
+
 
 /* CHAT APP CONTAINER */
 #chat-app {
