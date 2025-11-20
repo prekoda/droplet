@@ -2,9 +2,10 @@ const ws = new WebSocket("wss://droplet-production-aaaf.up.railway.app");
 
 let myUsername = "";
 let replyToMsg = null;
-let currentChatUser = null; // null = group, otherwise username
 
-// ======= THEME TOGGLE =======
+// Track private chat windows
+const dmWindows = new Map(); // username => { container, messagesDiv }
+
 const toggleBtn = document.getElementById("themeToggle");
 toggleBtn.onclick = () => {
   if(document.body.classList.contains("light")){
@@ -27,14 +28,11 @@ ws.onmessage = (event)=>{
       break;
 
     case "chat":
-      if(currentChatUser===null) addMessage(data.username,data.message,data.replyTo,data.time,data.fileType,data.fileData,data.reactions||{});
+      addGroupMessage(data.username,data.message,data.replyTo,data.time,data.fileType,data.fileData,data.reactions||{});
       break;
 
     case "dm":
-      // Only show if DM matches current chat
-      if(currentChatUser===data.from || currentChatUser===data.to){
-        addDMMessage(data);
-      }
+      addDMMessage(data);
       break;
 
     case "reaction-update":
@@ -55,40 +53,85 @@ function updateUsersDropdown(users){
     const li=document.createElement("li");
     li.textContent=user;
     li.className="dropdown-item";
-    li.onclick=()=>startPrivateChat(user);
+    li.onclick=()=>openDMWindow(user);
     usersList.appendChild(li);
   });
 }
 
-// ======= START PRIVATE CHAT =======
-function startPrivateChat(user){
-  currentChatUser = user;
-  document.getElementById("messages").innerHTML="";
-  document.getElementById("reply-preview").classList.add("d-none");
+// ======= OPEN DM WINDOW =======
+function openDMWindow(user){
+  if(dmWindows.has(user)) return;
+
+  const container=document.getElementById("dm-container");
+  const dmDiv=document.createElement("div");
+  dmDiv.classList.add("dm-window");
+
+  const header=document.createElement("div");
+  header.classList.add("dm-header");
+  header.textContent=user;
+
+  const messagesDiv=document.createElement("div");
+  messagesDiv.classList.add("dm-messages");
+
+  const inputDiv=document.createElement("div");
+  inputDiv.classList.add("p-1");
+  const input=document.createElement("input");
+  input.type="text";
+  input.placeholder="Type a message...";
+  input.classList.add("form-control","form-control-sm");
+  input.addEventListener("keypress", e=>{
+    if(e.key==="Enter") sendDM(user,input);
+  });
+
+  inputDiv.appendChild(input);
+
+  dmDiv.appendChild(header);
+  dmDiv.appendChild(messagesDiv);
+  dmDiv.appendChild(inputDiv);
+
+  container.appendChild(dmDiv);
+
+  dmWindows.set(user,{ container: dmDiv, messagesDiv, input });
 }
 
-// ======= SEND MESSAGE =======
+// ======= SEND DM =======
+function sendDM(user,input){
+  const msg=input.value.trim();
+  if(!msg) return;
+  ws.send(JSON.stringify({ type:"dm", to:user, message:msg }));
+  input.value="";
+}
+
+// ======= ADD DM MESSAGE =======
+function addDMMessage(data){
+  const user = data.from===myUsername?data.to:data.from;
+  if(!dmWindows.has(user)) openDMWindow(user);
+
+  const { messagesDiv } = dmWindows.get(user);
+  const div=document.createElement("div");
+  div.classList.add("msg");
+  div.innerHTML=`<span class="name">${data.from} → ${data.to}</span>: ${data.message}`;
+  div.classList.add(data.from===myUsername?"me":"other");
+  messagesDiv.appendChild(div);
+  messagesDiv.scrollTop=messagesDiv.scrollHeight;
+}
+
+// ======= GROUP CHAT =======
 const msgInput=document.getElementById("msgInput");
 const sendBtn=document.getElementById("sendBtn");
-sendBtn.onclick=sendMsg;
-msgInput.addEventListener("keypress",e=>{if(e.key==="Enter")sendMsg();});
+sendBtn.onclick=sendGroupMsg;
+msgInput.addEventListener("keypress",e=>{if(e.key==="Enter")sendGroupMsg();});
 
-function sendMsg(){
+function sendGroupMsg(){
   const msg=msgInput.value.trim();
   if(!msg) return;
-
-  if(currentChatUser){
-    ws.send(JSON.stringify({ type:"dm", to: currentChatUser, message: msg }));
-  } else {
-    ws.send(JSON.stringify({ type:"chat", message: msg, replyTo: replyToMsg }));
-  }
+  ws.send(JSON.stringify({ type:"chat", message:msg, replyTo: replyToMsg }));
   msgInput.value="";
   replyToMsg=null;
   document.getElementById("reply-preview").classList.add("d-none");
 }
 
-// ======= ADD GROUP MESSAGE =======
-function addMessage(name,text,replyTo=null,time=Date.now(),fileType=null,fileData=null,reactions={}){
+function addGroupMessage(name,text,replyTo=null,time=Date.now(),fileType=null,fileData=null,reactions={}){
   const container=document.getElementById("messages");
   const div=document.createElement("div");
   div.classList.add("msg");
@@ -98,7 +141,6 @@ function addMessage(name,text,replyTo=null,time=Date.now(),fileType=null,fileDat
   let contentHtml="";
   if(fileType && fileData && fileType.startsWith("image/")) contentHtml=`<img src="${fileData}" alt="image">`;
   else contentHtml=name===myUsername?text:`<span class="name">${name}</span>${text}`;
-
   div.innerHTML=replyHtml+contentHtml;
 
   // Reply button
@@ -127,17 +169,6 @@ function addMessage(name,text,replyTo=null,time=Date.now(),fileType=null,fileDat
   container.scrollTop=container.scrollHeight;
 }
 
-// ======= ADD DM MESSAGE =======
-function addDMMessage(data){
-  const container=document.getElementById("messages");
-  const div=document.createElement("div");
-  div.classList.add("msg");
-  div.innerHTML=`<span class="name">${data.from} → ${data.to}</span>: ${data.message}`;
-  div.classList.add(data.from===myUsername?"me":"other");
-  container.appendChild(div);
-  container.scrollTop=container.scrollHeight;
-}
-
 // ======= REPLY =======
 const replyPreview=document.getElementById("reply-preview");
 const replyText=document.getElementById("reply-text");
@@ -149,6 +180,7 @@ function startReply(msgDiv,name,text){
   msgInput.focus();
 }
 
+// Cancel reply
 document.getElementById("cancel-reply").onclick=()=>{
   replyToMsg=null;
   replyPreview.classList.add("d-none");
@@ -162,7 +194,7 @@ function reactToMessage(msgDiv,emoji){
 }
 
 function updateReactions(time,reactions){
-  const msgDiv=Array.from(document.querySelectorAll(".msg")).find(m=>m.dataset.time==time);
+  const msgDiv=Array.from(document.querySelectorAll("#messages .msg")).find(m=>m.dataset.time==time);
   if(!msgDiv) return;
   const reactionsDiv=msgDiv.querySelector(".reactions");
   const emojis=["👍","❤️","😂","😮","😢","👎"];
