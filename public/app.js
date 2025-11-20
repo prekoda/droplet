@@ -2,6 +2,14 @@ const ws = new WebSocket("wss://droplet-production-aaaf.up.railway.app");
 
 let myUsername = "";
 let replyToMsg = null;
+const togglePrivateBtn = document.getElementById("togglePrivateBtn");
+const privateChatPanel = document.getElementById("private-chat-panel");
+const privateChatsList = document.getElementById("privateChatsList");
+
+togglePrivateBtn.onclick = () => {
+  privateChatPanel.classList.toggle("collapsed");
+};
+
 
 // Track private chat windows
 const dmWindows = new Map(); // username => { container, messagesDiv }
