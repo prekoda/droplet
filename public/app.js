@@ -10,9 +10,8 @@ togglePrivateBtn.onclick = () => {
   privateChatPanel.classList.toggle("collapsed");
 };
 
-
 // Track private chat windows
-const dmWindows = new Map(); // username => { container, messagesDiv }
+const dmWindows = new Map(); // username => { container, messagesDiv, input }
 
 const toggleBtn = document.getElementById("themeToggle");
 toggleBtn.onclick = () => {
@@ -68,9 +67,10 @@ function updateUsersDropdown(users){
 
 // ======= OPEN DM WINDOW =======
 function openDMWindow(user){
+  if(user===myUsername) return; // cannot DM self
   if(dmWindows.has(user)) return;
 
-  const container=document.getElementById("dm-container");
+  const container=document.getElementById("privateChatsList");
   const dmDiv=document.createElement("div");
   dmDiv.classList.add("dm-window");
 
