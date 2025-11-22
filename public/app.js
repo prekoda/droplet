@@ -1,6 +1,5 @@
 // WebSocket connection
-const ws = new WebSocket(import.meta.env.VITE_WS_URL);
-// const ws = new WebSocket("wss://droplet-production-aaaf.up.railway.app");
+const ws = new WebSocket("wss://droplet-production-aaaf.up.railway.app");
 
 let myUsername = "";
 let replyToMsg = null;
