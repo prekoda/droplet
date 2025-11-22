@@ -1,141 +1,170 @@
-const http = require("http");
-const fs = require("fs");
-const path = require("path");
-const WebSocket = require("ws");
+import express from "express";
+import http from "http";
+import { WebSocketServer } from "ws";
+import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
+import dotenv from "dotenv";
+import cors from "cors";
+import bodyParser from "body-parser";
 
-// Serve frontend files
-const server = http.createServer((req, res) => {
-  let filePath = path.join(__dirname, "public", req.url === "/" ? "index.html" : req.url);
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
-      res.writeHead(404);
-      res.end("Not found");
-      return;
+dotenv.config();
+
+// ======= CONFIG =======
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET;
+const MONGO_URI = process.env.MONGODB_URI;
+const GROUP_MESSAGE_TTL = 24 * 60 * 60; // 24 hours in seconds
+const DM_MESSAGE_TTL = 30 * 24 * 60 * 60; // 30 days in seconds
+
+// ======= MONGODB MODELS =======
+await mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+
+// Users
+const userSchema = new mongoose.Schema({
+  username: { type: String, unique: true },
+  passwordHash: String,
+});
+const User = mongoose.model("User", userSchema);
+
+// Group messages
+const groupMessageSchema = new mongoose.Schema({
+  username: String,
+  message: String,
+  replyTo: String,
+  time: { type: Date, default: Date.now },
+  fileType: String,
+  fileData: String,
+  reactions: { type: Map, of: String },
+});
+groupMessageSchema.index({ time: 1 }, { expireAfterSeconds: GROUP_MESSAGE_TTL });
+const GroupMessage = mongoose.model("GroupMessage", groupMessageSchema);
+
+// Private messages
+const privateMessageSchema = new mongoose.Schema({
+  from: String,
+  to: String,
+  message: String,
+  replyTo: String,
+  time: { type: Date, default: Date.now },
+  fileType: String,
+  fileData: String,
+});
+privateMessageSchema.index({ time: 1 }, { expireAfterSeconds: DM_MESSAGE_TTL });
+const PrivateMessage = mongoose.model("PrivateMessage", privateMessageSchema);
+
+// ======= EXPRESS SETUP =======
+const app = express();
+app.use(cors());
+app.use(bodyParser.json());
+app.use(express.static("public"));
+
+// ======= SIMPLE AUTH =======
+app.post("/login", async (req, res) => {
+  const { username } = req.body;
+  if (!username) return res.status(400).json({ error: "Username required" });
+
+  let user = await User.findOne({ username });
+  if (!user) user = await User.create({ username });
+
+  const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: "1d" });
+  res.json({ token, username });
+});
+
+// ======= HTTP SERVER =======
+const server = http.createServer(app);
+
+// ======= WEBSOCKET SERVER =======
+const wss = new WebSocketServer({ server });
+const clients = new Map(); // ws -> username
+
+wss.on("connection", (ws) => {
+  let user = null;
+
+  ws.on("message", async (msg) => {
+    try {
+      const data = JSON.parse(msg);
+
+      // Authenticate user
+      if (!user && data.type === "auth") {
+        const payload = jwt.verify(data.token, JWT_SECRET);
+        user = payload.username;
+        clients.set(ws, user);
+
+        ws.send(JSON.stringify({ type: "welcome", username: user }));
+        broadcastUsers();
+        return;
+      }
+
+      if (!user) {
+        ws.send(JSON.stringify({ type: "error", message: "Unauthorized" }));
+        return;
+      }
+
+      switch (data.type) {
+        case "chat":
+          const chatMsg = await GroupMessage.create({
+            username: user,
+            message: data.message,
+            replyTo: data.replyTo,
+          });
+          broadcast({ type: "chat", ...chatMsg.toObject() });
+          break;
+
+        case "dm":
+          const dmMsg = await PrivateMessage.create({
+            from: user,
+            to: data.to,
+            message: data.message,
+          });
+          sendDM(dmMsg);
+          break;
+
+        case "reaction":
+          // Update reactions on group messages
+          const msgToUpdate = await GroupMessage.findOne({ _id: data.messageId });
+          if (!msgToUpdate) return;
+          msgToUpdate.reactions.set(user, data.emoji);
+          await msgToUpdate.save();
+          broadcast({ type: "reaction-update", messageId: data.messageId, reactions: Object.fromEntries(msgToUpdate.reactions) });
+          break;
+      }
+    } catch (err) {
+      console.error(err);
+      ws.send(JSON.stringify({ type: "error", message: err.message }));
     }
-    const ext = path.extname(filePath).toLowerCase();
-    const types = { ".html": "text/html", ".css": "text/css", ".js": "application/javascript", ".png":"image/png", ".ico":"image/x-icon" };
-    res.writeHead(200, { "Content-Type": types[ext] || "text/plain" });
-    res.end(data);
+  });
+
+  ws.on("close", () => {
+    if (user) {
+      clients.delete(ws);
+      broadcastUsers();
+    }
   });
 });
 
-// WebSocket server
-const wss = new WebSocket.Server({ server });
-
-// Random username generator
-function generateName() {
-  const colors = ["Red","Green","Blue","Yellow","Purple","Aqua"];
-  const animals = ["Fox","Bear","Wolf","Panda","Eagle","Hawk"];
-  return colors[Math.floor(Math.random()*colors.length)] +
-         animals[Math.floor(Math.random()*animals.length)] +
-         "-" + Math.floor(Math.random()*9999);
+// ======= HELPERS =======
+function broadcast(obj) {
+  const msg = JSON.stringify(obj);
+  for (const client of clients.keys()) {
+    if (client.readyState === client.OPEN) client.send(msg);
+  }
 }
-
-// Users and messages
-const users = new Map(); // ws => username
-const messages = []; // group messages
-const privateMessages = new Map(); // key=username1|username2 => array of messages
 
 function broadcastUsers() {
-  const userList = Array.from(users.values());
-  const payload = JSON.stringify({ type:"users", users:userList });
-  wss.clients.forEach(client => {
-    if(client.readyState===WebSocket.OPEN) client.send(payload);
-  });
+  const users = Array.from(clients.values());
+  broadcast({ type: "users", users });
 }
 
-// Helper to get private chat key (sorted usernames)
-function getDMKey(userA, userB) {
-  return [userA, userB].sort().join("|");
+function sendDM(dmMsg) {
+  const msgObj = { type: "dm", ...dmMsg.toObject() };
+  for (const [ws, username] of clients.entries()) {
+    if (username === dmMsg.from || username === dmMsg.to) {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msgObj));
+    }
+  }
 }
 
-wss.on("connection", ws => {
-  const username = generateName();
-  users.set(ws, username);
-
-  ws.send(JSON.stringify({ type:"welcome", username }));
-
-  // Send previous group messages
-  messages.forEach(msg => ws.send(JSON.stringify(msg)));
-
-  // Send previous private messages for each pair
-  privateMessages.forEach((msgs, key) => {
-    const [userA, userB] = key.split("|");
-    if(userA === username || userB === username){
-      msgs.forEach(m => ws.send(JSON.stringify(m)));
-    }
-  });
-
-  broadcastUsers();
-
-  ws.on("message", msg => {
-    let data;
-    try { data = JSON.parse(msg.toString()); } catch { return; }
-
-    // ====== Private DM ======
-    if(data.type==="dm" && data.to) {
-      const recipientEntry = [...users.entries()].find(([sock,u])=>u===data.to);
-      if(!recipientEntry) return; // recipient offline
-
-      const payload = {
-        type:"dm",
-        from: username,
-        to: data.to,
-        message: data.message,
-        replyTo: data.replyTo||null,
-        time: Date.now(),
-        fileType: data.fileType||null,
-        fileData: data.fileData||null
-      };
-
-      // Store in map
-      const key = getDMKey(username, data.to);
-      if(!privateMessages.has(key)) privateMessages.set(key, []);
-      privateMessages.get(key).push(payload);
-
-      // Send only to sender and recipient
-      [ws, recipientEntry[0]].forEach(client => {
-        if(client.readyState===WebSocket.OPEN) client.send(JSON.stringify(payload));
-      });
-      return;
-    }
-
-    // ====== Group chat ======
-    if(data.type==="chat") {
-      const payload = {
-        type:"chat",
-        username,
-        message:data.message||"",
-        replyTo:data.replyTo||null,
-        time:Date.now(),
-        fileType:data.fileType||null,
-        fileData:data.fileData||null,
-        reactions:{} // per-user reactions
-      };
-      messages.push(payload);
-      wss.clients.forEach(client => {
-        if(client.readyState===WebSocket.OPEN) client.send(JSON.stringify(payload));
-      });
-      return;
-    }
-
-    // ====== Reaction ======
-    if(data.type==="reaction") {
-      const target = messages.find(m=>m.time==data.time);
-      if(target){
-        target.reactions[username] = data.emoji;
-        const payload = { type:"reaction-update", time: target.time, reactions: target.reactions };
-        wss.clients.forEach(client => {
-          if(client.readyState===WebSocket.OPEN) client.send(JSON.stringify(payload));
-        });
-      }
-    }
-  });
-
-  ws.on("close", ()=>{
-    users.delete(ws);
-    broadcastUsers();
-  });
+// ======= START SERVER =======
+server.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
 });
-
-server.listen(3000,"0.0.0.0",()=>console.log("Chat server running on http://0.0.0.0:3000"));
