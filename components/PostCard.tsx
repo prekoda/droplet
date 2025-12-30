@@ -2,7 +2,7 @@
 
 import { MessageCircle, Flag, ThumbsUp, Send, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 
 interface PostProps {
@@ -15,6 +15,7 @@ interface PostProps {
     currentUserId: string | null
     onDelete: () => void
     relateCount: number
+    initialHasRelated: boolean
 }
 
 interface Reply {
@@ -26,32 +27,84 @@ interface Reply {
     }
 }
 
-export default function PostCard({ id, content, createdAt, tag, username, userId, currentUserId, onDelete, relateCount: initialRelateCount }: PostProps) {
+export default function PostCard({ id, content, createdAt, tag, username, userId, currentUserId, onDelete, relateCount: initialRelateCount, initialHasRelated }: PostProps) {
     const [showReplies, setShowReplies] = useState(false)
     const [replies, setReplies] = useState<Reply[]>([])
     const [replyText, setReplyText] = useState("")
     const [loadingReplies, setLoadingReplies] = useState(false)
-    const [hasRelated, setHasRelated] = useState(false)
+    const [hasRelated, setHasRelated] = useState(initialHasRelated)
     const [relateCount, setRelateCount] = useState(initialRelateCount)
     const [isDeleting, setIsDeleting] = useState(false)
     const [isReporting, setIsReporting] = useState(false)
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
     const isAuthor = currentUserId === userId
     const displayUsername = tag === "Confession" ? "Anonymous" : (username || "Unknown")
 
-    const handleDelete = async () => {
-        if (!confirm("Are you sure you want to delete this post?")) return
+    // Check if user has already related to this post
+    useEffect(() => {
+        const checkRelateStatus = async () => {
+            if (!currentUserId) return
+
+            const supabase = createClient()
+            console.log("Checking relate status for post:", id, "user:", currentUserId)
+
+            const { data, error } = await supabase
+                .from('interactions')
+                .select('id')
+                .eq('post_id', id)
+                .eq('user_id', currentUserId)
+                .eq('type', 'relate')
+                .maybeSingle()
+
+            if (error) {
+                console.error('❌ Error checking relate status:', error)
+            } else if (data) {
+                console.log('✅ User IS related to post:', id)
+                setHasRelated(true)
+            } else {
+                console.log('ℹ️ User is NOT related to post:', id)
+                setHasRelated(false)
+            }
+        }
+
+        checkRelateStatus()
+    }, [currentUserId, id])
+
+    const handleDeleteClick = () => {
+        setShowDeleteConfirm(true)
+    }
+
+    const confirmDelete = async () => {
         setIsDeleting(true)
         const supabase = createClient()
-        const { error } = await supabase.from('posts').delete().eq('id', id)
+        console.log("🗑️ Deleting post:", id)
+
+        // Use select() to ensure we get confirmation of what was deleted
+        const { error, data } = await supabase
+            .from('posts')
+            .delete()
+            .eq('id', id)
+            .select()
 
         if (error) {
-            console.error(error)
-            alert("Failed to delete post")
+            console.error("❌ Delete error:", error)
+            alert(`Failed to delete post: ${error.message}`)
             setIsDeleting(false)
+            setShowDeleteConfirm(false)
+        } else if (!data || data.length === 0) {
+            console.error("❌ Delete failed: No rows affected. RLS may be blocking deletion.")
+            alert("Failed to delete post. You might not have permission.")
+            setIsDeleting(false)
+            setShowDeleteConfirm(false)
         } else {
+            console.log("✅ Post deleted successfully:", data)
             onDelete()
         }
+    }
+
+    const cancelDelete = () => {
+        setShowDeleteConfirm(false)
     }
 
     const handleRelateToggle = async () => {
@@ -61,6 +114,7 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
         }
 
         const supabase = createClient()
+        console.log(`🔄 ${hasRelated ? 'Removing' : 'Adding'} relate for post:`, id)
 
         if (hasRelated) {
             // Remove relate
@@ -71,7 +125,11 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
                 .eq('user_id', currentUserId)
                 .eq('type', 'relate')
 
-            if (!error) {
+            if (error) {
+                console.error("❌ Error removing relate:", JSON.stringify(error, null, 2))
+                alert(`Failed to remove relate: ${error.message}`)
+            } else {
+                console.log("✅ Relate removed")
                 setHasRelated(false)
                 setRelateCount(prev => prev - 1)
             }
@@ -81,7 +139,17 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
                 .from('interactions')
                 .insert({ post_id: id, user_id: currentUserId, type: 'relate' })
 
-            if (!error) {
+            if (error) {
+                // Ignore unique constraint violation (means strictly already related)
+                if (error.code === '23505') {
+                    console.warn("⚠️ Already related (duplicate key ignored)")
+                    setHasRelated(true)
+                } else {
+                    console.error("❌ Error adding relate:", JSON.stringify(error, null, 2))
+                    alert(`Failed to add relate: ${error.message}`)
+                }
+            } else {
+                console.log("✅ Relate added")
                 setHasRelated(true)
                 setRelateCount(prev => prev + 1)
             }
@@ -170,15 +238,45 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
         }
     }
 
-    // Reply Delete Logic (Inline for MVP)
-    const handleDeleteReply = async (replyId: string) => {
+    // Reply Delete Logic (Verified)
+    const handleDeleteReply = async (replyId: string, replyUserId: string) => {
+        if (currentUserId !== replyUserId) {
+            alert("You can only delete your own replies")
+            return
+        }
+
         if (!confirm("Delete reply?")) return
+
+        console.log(`🗑️ Attempting to delete reply ${replyId} by user ${currentUserId}`)
         const supabase = createClient()
-        const { error } = await supabase.from('replies').delete().eq('id', replyId)
-        if (!error) {
+
+        const { error, data } = await supabase
+            .from('replies')
+            .delete()
+            .eq('id', replyId)
+            .eq('user_id', currentUserId)
+            .select()
+
+        if (error) {
+            console.error("❌ Failed to delete reply (DB Error):", error)
+            alert(`Failed to delete reply: ${error.message}`)
+        } else if (!data || data.length === 0) {
+            console.error("❌ Failed to delete reply (No rows affected). check RLS or ownership.")
+            alert("Failed to delete reply. It may have already been deleted or you don't have permission.")
+        } else {
+            console.log("✅ Reply deleted successfully:", data)
             setReplies(replies.filter(r => r.id !== replyId))
         }
     }
+
+    // Sync local state with prop when it changes (e.g. after refresh/re-fetch)
+    useEffect(() => {
+        setRelateCount(initialRelateCount)
+    }, [initialRelateCount])
+
+    useEffect(() => {
+        setHasRelated(initialHasRelated)
+    }, [initialHasRelated])
 
     return (
         <div className="w-full border-b border-border py-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
@@ -197,18 +295,45 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
                     )}
                 </div>
                 {isAuthor && (
-                    <button
-                        onClick={handleDelete}
-                        disabled={isDeleting}
-                        className="text-muted-foreground hover:text-destructive transition-colors p-1"
-                    >
-                        <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {!showDeleteConfirm ? (
+                            <button
+                                onClick={handleDeleteClick}
+                                disabled={isDeleting}
+                                className="text-muted-foreground hover:text-destructive transition-colors p-1"
+                            >
+                                <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                        ) : (
+                            <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right duration-200">
+                                <span className="text-[10px] text-muted-foreground mr-1">Delete?</span>
+                                <button
+                                    onClick={confirmDelete}
+                                    disabled={isDeleting}
+                                    className="px-2 py-0.5 text-[10px] bg-destructive text-destructive-foreground rounded hover:bg-destructive/90 transition-colors disabled:opacity-50"
+                                >
+                                    {isDeleting ? "..." : "Yes"}
+                                </button>
+                                <button
+                                    onClick={cancelDelete}
+                                    disabled={isDeleting}
+                                    className="px-2 py-0.5 text-[10px] bg-secondary text-secondary-foreground rounded hover:bg-secondary/80 transition-colors disabled:opacity-50"
+                                >
+                                    No
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 )}
             </div>
 
-            <p className="text-[15px] leading-relaxed text-foreground/90 whitespace-pre-wrap mb-4 font-normal">
+            <p className="text-[15px] leading-relaxed text-foreground/90 whitespace-pre-wrap mb-3 font-normal">
                 {content}
+            </p>
+
+            {/* Instagram-style relate count display - ALWAYS SHOW */}
+            <p className="text-xs font-semibold text-foreground/90 mb-3">
+                {relateCount} {relateCount === 1 ? 'relate' : 'relates'}
             </p>
 
             <div className="flex items-center gap-6">
@@ -219,9 +344,8 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
                         hasRelated ? "text-blue-600" : "text-muted-foreground"
                     )}
                 >
-                    <ThumbsUp className={cn("h-3.5 w-3.5", hasRelated && "fill-current")} />
-                    <span>Relate</span>
-                    {relateCount > 0 && <span className="text-xs">({relateCount})</span>}
+                    <ThumbsUp className={cn("h-4 w-4", hasRelated && "fill-current")} />
+                    <span>{hasRelated ? "Related" : "Relate"}</span>
                 </button>
 
                 <button
@@ -244,31 +368,39 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
             </div>
 
             {showReplies && (
-                <div className="mt-4 pl-4 border-l-2 border-border/50 space-y-3">
-                    {loadingReplies && <p className="text-xs text-muted-foreground">Loading...</p>}
+                <div className="mt-4 border-t border-border/50 pt-3">
+                    {/* Scrollable Replies Container */}
+                    <div className="max-h-60 overflow-y-auto space-y-3 pr-2 mb-3 scrollbar-thin scrollbar-thumb-secondary scrollbar-track-transparent">
+                        {loadingReplies && <p className="text-xs text-muted-foreground">Loading...</p>}
 
-                    {replies.map(reply => (
-                        <div key={reply.id} className="text-sm text-foreground/80 group">
-                            <div className="flex items-baseline justify-between">
-                                <div>
-                                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider mr-2 font-bold">
-                                        {reply.profiles?.username || "Anon"}
-                                    </span>
-                                    {reply.content}
+                        {replies.length === 0 && !loadingReplies && (
+                            <p className="text-xs text-muted-foreground text-center py-2">No replies yet</p>
+                        )}
+
+                        {replies.map(reply => (
+                            <div key={reply.id} className="text-sm text-foreground/80 group pl-3 border-l-2 border-border/50">
+                                <div className="flex items-baseline justify-between">
+                                    <div className="flex-1 mr-2">
+                                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider mr-2 font-bold block mb-0.5">
+                                            {reply.profiles?.username || "Anon"}
+                                        </span>
+                                        <p className="whitespace-pre-wrap leading-relaxed">{reply.content}</p>
+                                    </div>
+                                    {currentUserId === reply.user_id && (
+                                        <button
+                                            onClick={() => handleDeleteReply(reply.id, reply.user_id)}
+                                            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all p-1"
+                                            title="Delete your reply"
+                                        >
+                                            <Trash2 className="h-3 w-3" />
+                                        </button>
+                                    )}
                                 </div>
-                                {currentUserId === reply.user_id && (
-                                    <button
-                                        onClick={() => handleDeleteReply(reply.id)}
-                                        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
-                                    >
-                                        <Trash2 className="h-3 w-3" />
-                                    </button>
-                                )}
                             </div>
-                        </div>
-                    ))}
+                        ))}
+                    </div>
 
-                    <div className="flex gap-2.5 mt-2">
+                    <div className="flex gap-2.5 pt-1 sticky bottom-0 bg-background/95 backdrop-blur z-10">
                         <input
                             type="text"
                             value={replyText}

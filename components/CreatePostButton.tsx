@@ -17,10 +17,14 @@ export default function CreatePostButton() {
         if (!text.trim()) return
 
         setIsPosting(true)
+        console.log("🚀 Starting post creation...")
 
         try {
             const supabase = createClient()
+            console.log("✅ Supabase client created")
+
             const { data: { user } } = await supabase.auth.getUser()
+            console.log("👤 User:", user ? `${user.id} (${user.email})` : "NOT LOGGED IN")
 
             if (!user) {
                 alert("You must be logged in to post.")
@@ -29,29 +33,47 @@ export default function CreatePostButton() {
             }
 
             // 1. Ensure Profile Exists (Self-Healing)
-            const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('id', user.id)
+            console.log("🔍 Checking if profile exists...")
+            const { count, error: countError } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('id', user.id)
+
+            if (countError) {
+                console.error("❌ Error checking profile:", countError)
+                alert(`Profile check failed: ${countError.message}`)
+                setIsPosting(false)
+                return
+            }
+
+            console.log(`📊 Profile count: ${count}`)
 
             if (count === 0) {
                 // Profile missing! Try to repair from metadata
+                console.log("⚠️ Profile missing! Attempting auto-repair...")
                 const meta = user.user_metadata
+                console.log("📝 User metadata:", meta)
+
                 if (meta?.username) {
-                    const { error: profileError } = await supabase.from('profiles').insert({
+                    const profileData = {
                         id: user.id,
                         email: user.email,
                         first_name: meta.first_name,
                         last_name: meta.last_name,
                         username: meta.username,
                         university: meta.university || 'BPDC',
-                        year: meta.year || '1',
+                        year: parseInt(meta.year) || 1,
                         mobile: meta.mobile
-                    })
+                    }
+                    console.log("🔧 Inserting profile:", profileData)
+
+                    const { error: profileError } = await supabase.from('profiles').insert(profileData)
                     if (profileError) {
-                        console.error("Auto-repair profile failed", profileError)
+                        console.error("❌ Auto-repair profile failed:", profileError)
                         alert("Account setup incomplete. Please contact support or try logging out and back in.")
                         setIsPosting(false)
                         return
                     }
+                    console.log("✅ Profile auto-repair successful")
                 } else {
+                    console.error("❌ No username in metadata")
                     alert("User profile missing. Please log out and sign up again.")
                     setIsPosting(false)
                     return
@@ -59,23 +81,28 @@ export default function CreatePostButton() {
             }
 
             // 2. Insert Post
-            const { error } = await supabase.from('posts').insert({
+            const postData = {
                 user_id: user.id,
                 content: text,
                 tag: tag
-            })
+            }
+            console.log("📮 Inserting post:", postData)
+
+            const { error, data } = await supabase.from('posts').insert(postData).select()
+            console.log("📬 Post insert response:", { error, data })
 
             if (error) {
-                console.error(error)
+                console.error("❌ Post insert error:", error)
                 alert(error.message)
             } else {
+                console.log("✅ Post created successfully!")
                 setIsOpen(false)
                 setText("")
                 setTag(null)
                 window.location.reload() // MVP: Refresh to show new post
             }
         } catch (err) {
-            console.error(err)
+            console.error("💥 Exception caught:", err)
             alert("Failed to post. Please try again.")
         } finally {
             setIsPosting(false)
