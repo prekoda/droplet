@@ -131,7 +131,6 @@ export default function SignupForm({ initialEmail, onBack, onSubmit, isLoading }
                         <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Mobile</label>
                         <input
                             type="tel"
-                            required
                             className="w-full rounded-lg border border-input bg-secondary/30 px-3 py-2 text-sm ring-offset-background transition-all focus:border-primary focus:bg-background focus:outline-none focus:ring-2 focus:ring-ring/50"
                             value={formData.mobile}
                             onChange={(e) => setFormData({ ...formData, mobile: e.target.value })}
