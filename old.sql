@@ -1,6 +1,5 @@
 -- Enable RLS
 -- alter table auth.users enable row level security; -- (Often enabled by default, skipping to avoid permission errors)
-
 -- Profiles: EXTENDED for Signup Requirements
 create table if not exists public.profiles (
   id uuid references auth.users on delete cascade not null primary key,
