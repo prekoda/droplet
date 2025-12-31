@@ -359,17 +359,17 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
             <div className="flex justify-between items-start mb-3">
                 <div className="flex items-center gap-3">
                     <div className="h-9 w-9 rounded-full bg-secondary/50 overflow-hidden border border-white/5 flex-shrink-0">
-                        {avatarUrl ? (
-                            <img src={avatarUrl} alt={username} className="h-full w-full object-cover" />
+                        {avatarUrl && tag !== "Confession" ? (
+                            <img src={avatarUrl} alt={displayUsername} className="h-full w-full object-cover" />
                         ) : (
-                            <div className="h-full w-full flex items-center justify-center bg-gradient-to-tr from-blue-500/10 to-purple-500/10 text-[10px] font-bold text-muted-foreground">
-                                {username?.slice(0, 2).toUpperCase()}
+                            <div className="h-full w-full flex items-center justify-center bg-gradient-to-tr from-muted/50 to-muted text-[10px] font-bold text-muted-foreground">
+                                {tag === "Confession" ? "A" : username?.slice(0, 2).toUpperCase() || "?"}
                             </div>
                         )}
                     </div>
                     <div>
                         <div className="flex items-center gap-2">
-                            <span className="font-semibold text-sm text-foreground/90">{username || "Anonymous"}</span>
+                            <span className="font-semibold text-sm text-foreground/90">{displayUsername}</span>
                             <span className="text-[10px] text-muted-foreground">• {createdAt}</span>
                         </div>
                         {tag && (
