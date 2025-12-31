@@ -15,6 +15,7 @@ interface PostProps {
     currentUserId: string | null
     onDelete: () => void
     relateCount: number
+    replyCount: number
     initialHasRelated: boolean
 }
 
@@ -22,15 +23,19 @@ interface Reply {
     id: string
     content: string
     user_id: string
+    is_deleted: boolean
+    is_edited: boolean
     profiles: {
         username: string
     }
 }
 
-export default function PostCard({ id, content, createdAt, tag, username, userId, currentUserId, onDelete, relateCount: initialRelateCount, initialHasRelated }: PostProps) {
+export default function PostCard({ id, content, createdAt, tag, username, userId, currentUserId, onDelete, relateCount: initialRelateCount, replyCount, initialHasRelated }: PostProps) {
     const [showReplies, setShowReplies] = useState(false)
     const [replies, setReplies] = useState<Reply[]>([])
     const [replyText, setReplyText] = useState("")
+    const [editingReplyId, setEditingReplyId] = useState<string | null>(null)
+    const [editText, setEditText] = useState("")
     const [loadingReplies, setLoadingReplies] = useState(false)
     const [hasRelated, setHasRelated] = useState(initialHasRelated)
     const [relateCount, setRelateCount] = useState(initialRelateCount)
@@ -191,8 +196,9 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
             setLoadingReplies(true)
             const supabase = createClient()
             const { data } = await supabase
+
                 .from('replies')
-                .select('id, content, user_id, profiles(username)')
+                .select('id, content, user_id, is_deleted, is_edited, profiles(username)')
                 .eq('post_id', id)
                 .order('created_at', { ascending: true })
 
@@ -214,7 +220,7 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
             post_id: id,
             user_id: user.id,
             content: replyText
-        }).select('id, content, user_id, profiles(username)')
+        }).select('id, content, user_id, is_deleted, is_edited, profiles(username)')
 
         if (data) {
             // Optimistic update mechanism would be better, but we need the joined profile data
@@ -229,7 +235,7 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
             // For MVP: let's reload replies or just append with a placeholder name if needed.
 
             // Quick Fix: Fetch the just-inserted row fully
-            const { data: newReply } = await supabase.from('replies').select('id, content, user_id, profiles(username)').eq('id', data[0].id).single()
+            const { data: newReply } = await supabase.from('replies').select('id, content, user_id, is_deleted, is_edited, profiles(username)').eq('id', data[0].id).single()
 
             if (newReply) {
                 setReplies([...replies, newReply as unknown as Reply])
@@ -238,35 +244,57 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
         }
     }
 
-    // Reply Delete Logic (Verified)
+    // Reply Delete Logic (Soft Delete)
     const handleDeleteReply = async (replyId: string, replyUserId: string) => {
-        if (currentUserId !== replyUserId) {
-            alert("You can only delete your own replies")
-            return
-        }
-
+        if (currentUserId !== replyUserId) return alert("You can only delete your own replies")
         if (!confirm("Delete reply?")) return
 
-        console.log(`🗑️ Attempting to delete reply ${replyId} by user ${currentUserId}`)
         const supabase = createClient()
-
-        const { error, data } = await supabase
+        const { error } = await supabase
             .from('replies')
-            .delete()
+            .update({ is_deleted: true }) // Soft delete
             .eq('id', replyId)
             .eq('user_id', currentUserId)
-            .select()
 
         if (error) {
-            console.error("❌ Failed to delete reply (DB Error):", error)
-            alert(`Failed to delete reply: ${error.message}`)
-        } else if (!data || data.length === 0) {
-            console.error("❌ Failed to delete reply (No rows affected). check RLS or ownership.")
-            alert("Failed to delete reply. It may have already been deleted or you don't have permission.")
+            console.error("❌ Failed to delete reply:", error)
+            alert("Failed to delete reply")
         } else {
-            console.log("✅ Reply deleted successfully:", data)
-            setReplies(replies.filter(r => r.id !== replyId))
+            // Optimistic update
+            setReplies(prev => prev.map(r => r.id === replyId ? { ...r, is_deleted: true } : r))
         }
+    }
+
+    const handleEditReply = (reply: Reply) => {
+        setEditingReplyId(reply.id)
+        setEditText(reply.content)
+    }
+
+    const saveEditReply = async () => {
+        if (!editingReplyId || !editText.trim()) return
+
+        const supabase = createClient()
+        const { error } = await supabase
+            .from('replies')
+            .update({ content: editText, is_edited: true })
+            .eq('id', editingReplyId)
+            .eq('user_id', currentUserId!) // Safe assertion if we show the button only for auth user
+
+        if (error) {
+            console.error("❌ Failed to edit reply:", error)
+            alert("Failed to update reply")
+        } else {
+            // Optimistic update
+            setReplies(prev => prev.map(r => r.id === editingReplyId ? { ...r, content: editText, is_edited: true } : r))
+            setEditingReplyId(null)
+            setEditText("")
+        }
+    }
+
+    const handleReplyTag = (username: string) => {
+        setReplyText(`@${username} `)
+        // Ideally focus the input here, but React state update might delay render.
+        // We can use a ref for the input if needed, but for now this is fine.
     }
 
     // Sync local state with prop when it changes (e.g. after refresh/re-fetch)
@@ -277,6 +305,49 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
     useEffect(() => {
         setHasRelated(initialHasRelated)
     }, [initialHasRelated])
+
+    // Realtime Replies Subscription
+    useEffect(() => {
+        if (!showReplies) return
+
+        const supabase = createClient()
+        const channel = supabase
+            .channel(`realtime-replies-${id}`)
+            .on('postgres_changes', {
+                event: '*',
+                schema: 'public',
+                table: 'replies',
+                filter: `post_id=eq.${id}`
+            }, async (payload) => {
+                if (payload.eventType === 'INSERT') {
+                    const { data: newReply, error } = await supabase
+                        .from('replies')
+                        .select('id, content, user_id, is_deleted, is_edited, profiles(username)')
+                        .eq('id', payload.new.id)
+                        .single()
+
+                    if (newReply && !error) {
+                        setReplies(prev => {
+                            if (prev.some(r => r.id === newReply.id)) return prev
+                            return [...prev, newReply as unknown as Reply]
+                        })
+                    }
+                } else if (payload.eventType === 'DELETE') {
+                    setReplies(prev => prev.filter(r => r.id !== payload.old.id))
+                } else if (payload.eventType === 'UPDATE') {
+                    setReplies(prev => prev.map(r =>
+                        r.id === payload.new.id
+                            ? { ...r, ...payload.new } // Merge updates (content, is_deleted)
+                            : r
+                    ))
+                }
+            })
+            .subscribe()
+
+        return () => {
+            supabase.removeChannel(channel)
+        }
+    }, [showReplies, id])
 
     return (
         <div className="w-full border-b border-border py-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
@@ -353,7 +424,7 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
                     className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
                 >
                     <MessageCircle className="h-3.5 w-3.5" />
-                    <span>Reply</span>
+                    <span>{replyCount > 0 ? `${replyCount} Replies` : 'Reply'}</span>
                 </button>
 
                 <div className="flex-1" />
@@ -384,16 +455,71 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
                                         <span className="text-[10px] text-muted-foreground uppercase tracking-wider mr-2 font-bold block mb-0.5">
                                             {reply.profiles?.username || "Anon"}
                                         </span>
-                                        <p className="whitespace-pre-wrap leading-relaxed">{reply.content}</p>
+
+                                        {editingReplyId === reply.id ? (
+                                            <div className="flex flex-col gap-2 mt-1">
+                                                <textarea
+                                                    value={editText}
+                                                    onChange={(e) => setEditText(e.target.value)}
+                                                    className="w-full bg-secondary/50 rounded p-2 text-sm outline-none border focus:border-primary/50"
+                                                    rows={2}
+                                                />
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        onClick={saveEditReply}
+                                                        className="text-xs bg-primary text-primary-foreground px-2 py-1 rounded"
+                                                    >
+                                                        Save
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setEditingReplyId(null)}
+                                                        className="text-xs bg-secondary text-secondary-foreground px-2 py-1 rounded"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="flex flex-col">
+                                                <p className={cn("whitespace-pre-wrap leading-relaxed", reply.is_deleted && "italic text-muted-foreground")}>
+                                                    {reply.is_deleted ? "message was deleted" : reply.content}
+                                                    {!reply.is_deleted && reply.is_edited && (
+                                                        <span className="text-[10px] text-muted-foreground ml-2 italic">(edited)</span>
+                                                    )}
+                                                </p>
+                                                {!reply.is_deleted && (
+                                                    <button
+                                                        onClick={() => handleReplyTag(reply.profiles?.username || "user")}
+                                                        className="text-[10px] text-muted-foreground hover:text-foreground self-start mt-1 font-medium"
+                                                    >
+                                                        Reply
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
-                                    {currentUserId === reply.user_id && (
-                                        <button
-                                            onClick={() => handleDeleteReply(reply.id, reply.user_id)}
-                                            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all p-1"
-                                            title="Delete your reply"
-                                        >
-                                            <Trash2 className="h-3 w-3" />
-                                        </button>
+
+                                    {currentUserId === reply.user_id && !reply.is_deleted && (
+                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                            {editingReplyId !== reply.id && (
+                                                <>
+                                                    <button
+                                                        onClick={() => handleEditReply(reply)}
+                                                        className="text-muted-foreground hover:text-foreground p-1 text-xs"
+                                                        title="Edit"
+                                                    >
+                                                        Edit
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeleteReply(reply.id, reply.user_id)}
+                                                        className="text-muted-foreground hover:text-destructive p-1"
+                                                        title="Delete"
+                                                    >
+                                                        <Trash2 className="h-3 w-3" />
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
                                     )}
                                 </div>
                             </div>
@@ -418,7 +544,8 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
                         </button>
                     </div>
                 </div>
-            )}
-        </div>
+            )
+            }
+        </div >
     )
 }

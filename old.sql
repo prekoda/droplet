@@ -70,18 +70,6 @@ begin
     end if;
 end $$;
 
--- Add new columns for sub-replies and soft delete if they don't exist
-alter table public.replies add column if not exists parent_id uuid references public.replies(id) on delete cascade;
-alter table public.replies add column if not exists is_deleted boolean default false;
-
--- Add update policy for soft delete
-do $$
-begin
-    if not exists (select 1 from pg_policies where tablename = 'replies' and policyname = 'Users can update own replies') then
-        create policy "Users can update own replies" on public.replies for update using (auth.uid() = user_id);
-    end if;
-end $$;
-
 -- Interactions
 create table if not exists public.interactions (
   id uuid default gen_random_uuid() primary key,
@@ -210,38 +198,3 @@ set relate_count = (
     from public.interactions i
     where i.post_id = p.id and i.type = 'relate'
 );
-
--- ENABLE REALTIME BROADCASTING (Safe Version)
--- 1. Create the publication 'supabase_realtime' if it doesn't exist
-do $$
-begin
-  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
-    create publication supabase_realtime;
-  end if;
-end $$;
-
--- 2. Safely add tables to the publication
-do $$
-begin
-  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'posts') then
-    alter publication supabase_realtime add table posts;
-  end if;
-  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'interactions') then
-    alter publication supabase_realtime add table interactions;
-  end if;
-  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'replies') then
-    alter publication supabase_realtime add table replies;
-  end if;
-end $$;
-
--- 3. Set Replica Identity to FULL
-alter table posts replica identity full;
-alter table interactions replica identity full;
-alter table replies replica identity full;
-
--- 4. Verify Policy for Public Access to Interactions
-drop policy if exists "Public interactions are visible" on public.interactions;
-create policy "Public interactions are visible" on public.interactions for select using (true);
-
--- 5. Add is_edited column (for "Edited" status)
-alter table public.replies add column if not exists is_edited boolean default false;

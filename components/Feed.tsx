@@ -19,6 +19,9 @@ interface Post {
     interactions?: {
         user_id: string
     }[]
+    replies?: {
+        count: number
+    }[]
 }
 
 export default function Feed() {
@@ -26,9 +29,12 @@ export default function Feed() {
     const [currentUserId, setCurrentUserId] = useState<string | null>(null)
     const [schemaError, setSchemaError] = useState(false)
 
+    const [realtimeStatus, setRealtimeStatus] = useState<'CONNECTING' | 'SUBSCRIBED' | 'ERROR'>('CONNECTING')
+
     useEffect(() => {
+        const supabase = createClient()
+
         const fetchPosts = async () => {
-            const supabase = createClient()
 
             // Check Profile
             const { data: { user } } = await supabase.auth.getUser()
@@ -46,7 +52,7 @@ export default function Feed() {
 
             const { data, error } = await supabase
                 .from('posts')
-                .select('*, profiles(username), interactions!left(user_id)')
+                .select('*, profiles(username), interactions!left(user_id), replies(count)')
                 .order('relate_count', { ascending: false })
                 .order('created_at', { ascending: false })
 
@@ -59,7 +65,7 @@ export default function Feed() {
                     // Retry without relate_count sorting
                     const { data: fallbackData } = await supabase
                         .from('posts')
-                        .select('*, profiles(username), interactions!left(user_id)')
+                        .select('*, profiles(username), interactions!left(user_id), replies(count)')
                         .order('created_at', { ascending: false })
 
                     if (fallbackData) {
@@ -75,7 +81,7 @@ export default function Feed() {
                 console.log("🔄 Retrying without relate_count sorting...")
                 const { data: fallbackData, error: fallbackError } = await supabase
                     .from('posts')
-                    .select('*, profiles(username), interactions!left(user_id)')
+                    .select('*, profiles(username), interactions!left(user_id), replies(count)')
                     .order('created_at', { ascending: false })
 
                 if (fallbackError) {
@@ -95,6 +101,109 @@ export default function Feed() {
         }
 
         fetchPosts()
+
+        const channel = supabase
+            .channel('realtime-feed')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, async (payload) => {
+                console.log('🔔 Post Change:', payload.eventType)
+                if (payload.eventType === 'INSERT') {
+                    const { data: newPost } = await supabase
+                        .from('posts')
+                        .select('*, profiles(username), interactions!left(user_id)')
+                        .eq('id', payload.new.id)
+                        .single()
+
+                    if (newPost) {
+                        setPosts((prev) => [newPost as Post, ...prev])
+                    }
+                } else if (payload.eventType === 'DELETE') {
+                    setPosts((prev) => prev.filter(p => p.id !== payload.old.id))
+                } else if (payload.eventType === 'UPDATE') {
+                    // Fetch the updated post to ensure we have all joined data (profiles, etc)
+                    // This is safer than merging payload.new which lacks joined tables
+                    const { data: updatedPost } = await supabase
+                        .from('posts')
+                        .select('*, profiles(username), interactions!left(user_id), replies(count)')
+                        .eq('id', payload.new.id)
+                        .single()
+
+                    if (updatedPost) {
+                        setPosts((prev) => prev.map(p =>
+                            p.id === updatedPost.id ? updatedPost as Post : p
+                        ))
+                    }
+                }
+            })
+            // Listen for Interactions (Likes/Relates) to update counts instantly
+            // This covers the case where the DB trigger might be missing or slow
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'interactions' }, (payload) => {
+                console.log('🔔 Interaction Change:', payload.eventType)
+                if (payload.eventType === 'INSERT' && payload.new.type === 'relate') {
+                    setPosts((prev) => prev.map(p =>
+                        p.id === payload.new.post_id
+                            ? { ...p, relate_count: (p.relate_count || 0) + 1 }
+                            : p
+                    ))
+                } else if (payload.eventType === 'DELETE' && payload.old.id) {
+                    // Start by checking if we need to decrement.
+                    // Ideally we'd check type but payload.old only has ID often.
+                    // However, we can optimistically decrement if we think it's a relate.
+                    // Better: We might not know the post_id easily from DELETE payload.old unless Replica Identity is set to Full.
+                    // Fallback: We can't easily map DELETE without post_id. 
+                    // BUT: Supabase typically sends `old` with primary keys.
+                    // If we can't identify the post, we might skip.
+                    // However, let's try to assume payload.old *might* have post_id if configured, 
+                    // OR we accept we might need to rely on 'posts' update for decrements if possible.
+                    // Actually, if we just listen to 'posts' UPDATE, that's cleaner IF the trigger exists.
+                    // Since I'm doing this as a fallback, let's try to trust 'posts' UPDATE first, 
+                    // but if that fails, this fallback handles INSERTS well (upvoting updates instantly).
+                    // For DELETE (downvoting), it's harder without post_id.
+
+                    // Let's assume standard behavior:
+                    // If we get an INSERT on interaction, we increment.
+                    // If we get a DELETE? We check if we have post_id.
+                    if (payload.old && (payload.old as any).post_id) {
+                        setPosts((prev) => prev.map(p =>
+                            p.id === (payload.old as any).post_id
+                                ? { ...p, relate_count: Math.max(0, (p.relate_count || 0) - 1) }
+                                : p
+                        ))
+                    }
+                }
+
+            })
+            // Listen for Replies (to update count on feed)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'replies' }, (payload) => {
+                if (payload.eventType === 'INSERT') {
+                    setPosts((prev) => prev.map(p =>
+                        p.id === payload.new.post_id
+                            ? { ...p, replies: [{ count: (p.replies?.[0]?.count || 0) + 1 }] }
+                            : p
+                    ))
+                } else if (payload.eventType === 'DELETE') {
+                    // Note: payload.old usually only has 'id' unless REPLICA IDENTITY FULL is set (which we did).
+                    // But even with FULL, we need to know the post_id to find the post.
+                    // If we have access to post_id in old record:
+                    const oldRecord = payload.old as any
+                    if (oldRecord.post_id) {
+                        setPosts((prev) => prev.map(p =>
+                            p.id === oldRecord.post_id
+                                ? { ...p, replies: [{ count: Math.max(0, (p.replies?.[0]?.count || 0) - 1) }] }
+                                : p
+                        ))
+                    }
+                }
+            })
+            .subscribe((status) => {
+                console.log("🔌 Realtime Status:", status)
+                if (status === 'SUBSCRIBED') setRealtimeStatus('SUBSCRIBED')
+                if (status === 'CHANNEL_ERROR') setRealtimeStatus('ERROR')
+                if (status === 'CLOSED') setRealtimeStatus('ERROR')
+            })
+
+        return () => {
+            supabase.removeChannel(channel)
+        }
     }, [])
 
     return (
@@ -105,6 +214,14 @@ export default function Feed() {
                     <div>
                         <h1 className="text-lg font-semibold tracking-tight">BITS Dubai</h1>
                         <p className="text-xs text-muted-foreground">Posts reset in 30 days</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className={`h-2 w-2 rounded-full ${realtimeStatus === 'SUBSCRIBED' ? 'bg-green-500 animate-pulse' :
+                            realtimeStatus === 'CONNECTING' ? 'bg-yellow-500' : 'bg-red-500'
+                            }`} />
+                        <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+                            {realtimeStatus === 'SUBSCRIBED' ? 'LIVE' : realtimeStatus}
+                        </span>
                     </div>
                 </div>
                 <ProfileSection />
@@ -141,6 +258,7 @@ export default function Feed() {
                             userId={post.user_id}
                             currentUserId={currentUserId}
                             relateCount={post.relate_count}
+                            replyCount={post.replies?.[0]?.count || 0}
                             initialHasRelated={initialHasRelated}
                             onDelete={() => setPosts(posts.filter(p => p.id !== post.id))}
                         />
