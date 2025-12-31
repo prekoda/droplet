@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   title: "DropLet | Connect Privately",
   description: "Anonymous social network for university students.",
   icons: {
-    icon: "/windows11/Square44x44Logo.targetsize-32.png",
+    icon: "/android/android-launchericon-192-192.png",
     apple: "/ios/180.png",
   },
   manifest: "/manifest.json",

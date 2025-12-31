@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { ArrowRight, Loader2, ArrowLeft } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import SignupForm from "./SignupForm"
@@ -252,7 +252,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         <div className="flex min-h-screen flex-col items-center justify-center p-4 anim-fade-in">
             <div className="w-full max-w-sm space-y-8">
                 <div className="text-center space-y-2">
-                    <h1 className="text-2xl font-semibold tracking-tight">Droplet</h1>
+                    <h1 className="text-2xl font-semibold tracking-tight">DropLet</h1>
                     <p className="text-sm text-muted-foreground">BITS Dubai students & Invited Guests (Gmail).</p>
                 </div>
 

@@ -1,11 +1,38 @@
 "use client"
 
-import { useState } from "react"
-import { Menu, X, HelpCircle, Shield, FileText, Info, LifeBuoy, MessageCircle } from "lucide-react"
+import { useState, useEffect } from "react"
+import { Menu, X, HelpCircle, Shield, FileText, Info, LifeBuoy, MessageCircle, LogOut, UserPlus } from "lucide-react"
 import Link from "next/link"
+import Image from "next/image"
+import { createClient } from "@/lib/supabase/client"
+import { useRouter } from "next/navigation"
+
 
 export default function Navbar() {
     const [isOpen, setIsOpen] = useState(false)
+    const [user, setUser] = useState<any>(null)
+    const router = useRouter()
+    const supabase = createClient()
+
+    useEffect(() => {
+        // Check initial session
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            setUser(session?.user ?? null)
+        })
+
+        // Listen for changes
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            setUser(session?.user ?? null)
+        })
+
+        return () => subscription.unsubscribe()
+    }, [])
+
+    const handleLogout = async () => {
+        await supabase.auth.signOut()
+        window.location.reload()
+    }
+
 
     const links = [
         { href: "/chat", label: "Join Chat", icon: MessageCircle },
@@ -18,20 +45,20 @@ export default function Navbar() {
 
     return (
         <nav className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60">
-            <div className="container flex h-14 max-w-5xl mx-auto items-center justify-between px-4">
-                <div className="flex items-center gap-2 font-bold text-lg tracking-tight">
-                    <div className="relative flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="currentColor"
-                            className="h-5 w-5 text-primary"
-                        >
-                            <path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z" />
-                        </svg>
+            <div className="container flex h-14 max-w-7xl mx-auto items-center justify-between px-6">
+                <Link href="/" className="flex items-center gap-2 font-bold text-lg tracking-tight hover:opacity-80 transition-opacity">
+                    <div className="relative flex h-8 w-8 items-center justify-center rounded-full overflow-hidden">
+                        <Image
+                            src="/android/android-launchericon-48-48.png"
+                            alt="Logo"
+                            width={32}
+                            height={32}
+                            className="object-cover"
+                        />
                     </div>
                     <span>DropLet</span>
-                </div>
+                </Link>
+
 
                 {/* Mobile Menu Toggle */}
                 <button
@@ -41,13 +68,29 @@ export default function Navbar() {
                     {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
                 </button>
 
-                {/* Desktop Links (Hidden on mobile for now as per "phone first" focus) */}
-                <div className="hidden md:flex gap-6 text-sm font-medium text-muted-foreground">
+                {/* Desktop Links */}
+                <div className="hidden md:flex items-center gap-8 text-sm font-medium text-muted-foreground">
                     {links.map((link) => (
-                        <Link key={link.label} href={link.href} className="hover:text-foreground transition-colors">
+                        <Link key={link.label} href={link.href} className="hover:text-foreground transition-colors flex items-center gap-2 whitespace-nowrap">
+                            <link.icon className="h-4 w-4" />
                             {link.label}
                         </Link>
                     ))}
+
+                    {user && (
+                        <>
+                            <div className="h-4 w-px bg-border/50" />
+                            <div className="flex items-center gap-4">
+                                <button
+                                    onClick={handleLogout}
+                                    className="hover:text-red-500 transition-colors flex items-center gap-2 whitespace-nowrap"
+                                >
+                                    <LogOut className="h-4 w-4" />
+                                    Log Out
+                                </button>
+                            </div>
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -66,6 +109,22 @@ export default function Navbar() {
                                 {link.label}
                             </Link>
                         ))}
+
+                        {user && (
+                            <>
+                                <div className="h-px bg-border/50 my-2" />
+                                <button
+                                    onClick={() => {
+                                        handleLogout()
+                                        setIsOpen(false)
+                                    }}
+                                    className="flex w-full items-center gap-3 text-sm font-medium text-muted-foreground hover:text-red-500 p-2 rounded-md hover:bg-secondary/50 transition-colors text-left"
+                                >
+                                    <LogOut className="h-4 w-4" />
+                                    Log Out
+                                </button>
+                            </>
+                        )}
                     </div>
                 </div>
             )}
