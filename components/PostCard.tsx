@@ -17,6 +17,9 @@ interface PostProps {
     relateCount: number
     replyCount: number
     initialHasRelated: boolean
+    avatarUrl?: string | null
+    mediaUrl?: string | null
+    mediaType?: string | null
 }
 
 interface Reply {
@@ -27,10 +30,11 @@ interface Reply {
     is_edited: boolean
     profiles: {
         username: string
+        avatar_url?: string | null
     }
 }
 
-export default function PostCard({ id, content, createdAt, tag, username, userId, currentUserId, onDelete, relateCount: initialRelateCount, replyCount, initialHasRelated }: PostProps) {
+export default function PostCard({ id, content, createdAt, tag, username, userId, currentUserId, onDelete, relateCount: initialRelateCount, replyCount, initialHasRelated, avatarUrl, mediaUrl, mediaType }: PostProps) {
     const [showReplies, setShowReplies] = useState(false)
     const [replies, setReplies] = useState<Reply[]>([])
     const [replyText, setReplyText] = useState("")
@@ -198,7 +202,7 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
             const { data } = await supabase
 
                 .from('replies')
-                .select('id, content, user_id, is_deleted, is_edited, profiles(username)')
+                .select('id, content, user_id, is_deleted, is_edited, profiles(username, avatar_url)')
                 .eq('post_id', id)
                 .order('created_at', { ascending: true })
 
@@ -220,7 +224,7 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
             post_id: id,
             user_id: user.id,
             content: replyText
-        }).select('id, content, user_id, is_deleted, is_edited, profiles(username)')
+        }).select('id, content, user_id, is_deleted, is_edited, profiles(username, avatar_url)')
 
         if (data) {
             // Optimistic update mechanism would be better, but we need the joined profile data
@@ -235,7 +239,7 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
             // For MVP: let's reload replies or just append with a placeholder name if needed.
 
             // Quick Fix: Fetch the just-inserted row fully
-            const { data: newReply } = await supabase.from('replies').select('id, content, user_id, is_deleted, is_edited, profiles(username)').eq('id', data[0].id).single()
+            const { data: newReply } = await supabase.from('replies').select('id, content, user_id, is_deleted, is_edited, profiles(username, avatar_url)').eq('id', data[0].id).single()
 
             if (newReply) {
                 setReplies([...replies, newReply as unknown as Reply])
@@ -322,7 +326,7 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
                 if (payload.eventType === 'INSERT') {
                     const { data: newReply, error } = await supabase
                         .from('replies')
-                        .select('id, content, user_id, is_deleted, is_edited, profiles(username)')
+                        .select('id, content, user_id, is_deleted, is_edited, profiles(username, avatar_url)')
                         .eq('id', payload.new.id)
                         .single()
 
@@ -351,19 +355,29 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
 
     return (
         <div className="w-full border-b border-border py-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
-            <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground/80">{displayUsername}</span>
-                    <span>•</span>
-                    <span>{createdAt}</span>
-                    {tag && (
-                        <>
-                            <span>•</span>
-                            <span className="px-1.5 py-0.5 rounded-full bg-secondary text-[10px] font-medium uppercase tracking-wider text-secondary-foreground">
-                                {tag}
+            {/* Header */}
+            <div className="flex justify-between items-start mb-3">
+                <div className="flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-full bg-secondary/50 overflow-hidden border border-white/5 flex-shrink-0">
+                        {avatarUrl ? (
+                            <img src={avatarUrl} alt={username} className="h-full w-full object-cover" />
+                        ) : (
+                            <div className="h-full w-full flex items-center justify-center bg-gradient-to-tr from-blue-500/10 to-purple-500/10 text-[10px] font-bold text-muted-foreground">
+                                {username?.slice(0, 2).toUpperCase()}
+                            </div>
+                        )}
+                    </div>
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <span className="font-semibold text-sm text-foreground/90">{username || "Anonymous"}</span>
+                            <span className="text-[10px] text-muted-foreground">• {createdAt}</span>
+                        </div>
+                        {tag && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-primary/10 text-primary w-fit block mt-0.5">
+                                #{tag}
                             </span>
-                        </>
-                    )}
+                        )}
+                    </div>
                 </div>
                 {isAuthor && (
                     <div className="flex items-center gap-2">
@@ -401,6 +415,17 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
             <p className="text-[15px] leading-relaxed text-foreground/90 whitespace-pre-wrap mb-3 font-normal">
                 {content}
             </p>
+
+            {/* Media Display */}
+            {mediaUrl && (
+                <div className="mb-3 rounded-xl overflow-hidden border border-border/50">
+                    {mediaType === 'video' ? (
+                        <video src={mediaUrl} controls className="w-full max-h-96 object-contain bg-black/5" />
+                    ) : (
+                        <img src={mediaUrl} alt="Post media" className="w-full max-h-96 object-contain bg-black/5" />
+                    )}
+                </div>
+            )}
 
             {/* Instagram-style relate count display - ALWAYS SHOW */}
             <p className="text-xs font-semibold text-foreground/90 mb-3">
@@ -452,9 +477,20 @@ export default function PostCard({ id, content, createdAt, tag, username, userId
                             <div key={reply.id} className="text-sm text-foreground/80 group pl-3 border-l-2 border-border/50">
                                 <div className="flex items-baseline justify-between">
                                     <div className="flex-1 mr-2">
-                                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider mr-2 font-bold block mb-0.5">
-                                            {reply.profiles?.username || "Anon"}
-                                        </span>
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <div className="h-5 w-5 rounded-full bg-secondary/50 overflow-hidden border border-white/5 flex-shrink-0">
+                                                {reply.profiles?.avatar_url ? (
+                                                    <img src={reply.profiles.avatar_url} alt={reply.profiles.username} className="h-full w-full object-cover" />
+                                                ) : (
+                                                    <div className="h-full w-full flex items-center justify-center bg-secondary text-[8px] font-bold text-muted-foreground">
+                                                        {reply.profiles?.username?.slice(0, 1).toUpperCase()}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold">
+                                                {reply.profiles?.username || "Anon"}
+                                            </span>
+                                        </div>
 
                                         {editingReplyId === reply.id ? (
                                             <div className="flex flex-col gap-2 mt-1">

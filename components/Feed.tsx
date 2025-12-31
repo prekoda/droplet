@@ -1,10 +1,14 @@
+
 "use client"
 
 import ProfileSection from "@/components/ProfileSection"
 import PostCard from "@/components/PostCard"
 import CreatePostButton from "@/components/CreatePostButton"
+import { ThumbsUp, MessageCircle, Send, Loader2, User } from "lucide-react"
+import Link from "next/link"
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { cn } from "@/lib/utils"
 
 interface Post {
     id: string
@@ -12,9 +16,12 @@ interface Post {
     created_at: string
     tag?: string
     user_id: string
+    media_url?: string | null
+    media_type?: string | null
     relate_count: number
     profiles?: {
         username: string
+        avatar_url?: string | null
     } | null
     interactions?: {
         user_id: string
@@ -27,6 +34,11 @@ interface Post {
 export default function Feed() {
     const [posts, setPosts] = useState<Post[]>([])
     const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+    const [currentUserProfile, setCurrentUserProfile] = useState<{
+        username: string
+        university: string
+        avatar_url?: string | null
+    } | null>(null)
     const [schemaError, setSchemaError] = useState(false)
 
     const [realtimeStatus, setRealtimeStatus] = useState<'CONNECTING' | 'SUBSCRIBED' | 'ERROR'>('CONNECTING')
@@ -40,7 +52,16 @@ export default function Feed() {
             const { data: { user } } = await supabase.auth.getUser()
             if (user) {
                 setCurrentUserId(user.id)
-                const { data: profile } = await supabase.from('profiles').select('id').eq('id', user.id).single()
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('id, username, university, avatar_url')
+                    .eq('id', user.id)
+                    .single()
+
+                if (profile) {
+                    setCurrentUserProfile(profile as any)
+                }
+
                 if (!profile) {
                     // Zombie User Detected
                     alert("Your profile is incomplete (Legacy Account). You will be logged out to create a new profile.")
@@ -52,7 +73,7 @@ export default function Feed() {
 
             const { data, error } = await supabase
                 .from('posts')
-                .select('*, profiles(username), interactions!left(user_id), replies(count)')
+                .select('*, profiles(username, avatar_url), interactions!left(user_id), replies(count)')
                 .order('relate_count', { ascending: false })
                 .order('created_at', { ascending: false })
 
@@ -65,7 +86,7 @@ export default function Feed() {
                     // Retry without relate_count sorting
                     const { data: fallbackData } = await supabase
                         .from('posts')
-                        .select('*, profiles(username), interactions!left(user_id), replies(count)')
+                        .select('*, profiles(username, avatar_url), interactions!left(user_id), replies(count)')
                         .order('created_at', { ascending: false })
 
                     if (fallbackData) {
@@ -81,7 +102,7 @@ export default function Feed() {
                 console.log("🔄 Retrying without relate_count sorting...")
                 const { data: fallbackData, error: fallbackError } = await supabase
                     .from('posts')
-                    .select('*, profiles(username), interactions!left(user_id), replies(count)')
+                    .select('*, profiles(username, avatar_url), interactions!left(user_id), replies(count)')
                     .order('created_at', { ascending: false })
 
                 if (fallbackError) {
@@ -109,7 +130,7 @@ export default function Feed() {
                 if (payload.eventType === 'INSERT') {
                     const { data: newPost } = await supabase
                         .from('posts')
-                        .select('*, profiles(username), interactions!left(user_id)')
+                        .select('*, profiles(username, avatar_url), interactions!left(user_id), replies(count)')
                         .eq('id', payload.new.id)
                         .single()
 
@@ -119,15 +140,17 @@ export default function Feed() {
                 } else if (payload.eventType === 'DELETE') {
                     setPosts((prev) => prev.filter(p => p.id !== payload.old.id))
                 } else if (payload.eventType === 'UPDATE') {
+                    console.log('🔔 Post UPDATE detected:', payload.new.id, 'relate_count:', payload.new.relate_count)
                     // Fetch the updated post to ensure we have all joined data (profiles, etc)
                     // This is safer than merging payload.new which lacks joined tables
                     const { data: updatedPost } = await supabase
                         .from('posts')
-                        .select('*, profiles(username), interactions!left(user_id), replies(count)')
+                        .select('*, profiles(username, avatar_url), interactions!left(user_id), replies(count)')
                         .eq('id', payload.new.id)
                         .single()
 
                     if (updatedPost) {
+                        console.log('✅ Updating post in UI, new relate_count:', updatedPost.relate_count)
                         setPosts((prev) => prev.map(p =>
                             p.id === updatedPost.id ? updatedPost as Post : p
                         ))
@@ -135,42 +158,24 @@ export default function Feed() {
                 }
             })
             // Listen for Interactions (Likes/Relates) to update counts instantly
-            // This covers the case where the DB trigger might be missing or slow
             .on('postgres_changes', { event: '*', schema: 'public', table: 'interactions' }, (payload) => {
-                console.log('🔔 Interaction Change:', payload.eventType)
+                console.log('🔔 Interaction Change:', payload.eventType, payload)
+
                 if (payload.eventType === 'INSERT' && payload.new.type === 'relate') {
+                    console.log('➕ Someone related to post:', payload.new.post_id)
                     setPosts((prev) => prev.map(p =>
                         p.id === payload.new.post_id
                             ? { ...p, relate_count: (p.relate_count || 0) + 1 }
                             : p
                     ))
-                } else if (payload.eventType === 'DELETE' && payload.old.id) {
-                    // Start by checking if we need to decrement.
-                    // Ideally we'd check type but payload.old only has ID often.
-                    // However, we can optimistically decrement if we think it's a relate.
-                    // Better: We might not know the post_id easily from DELETE payload.old unless Replica Identity is set to Full.
-                    // Fallback: We can't easily map DELETE without post_id. 
-                    // BUT: Supabase typically sends `old` with primary keys.
-                    // If we can't identify the post, we might skip.
-                    // However, let's try to assume payload.old *might* have post_id if configured, 
-                    // OR we accept we might need to rely on 'posts' update for decrements if possible.
-                    // Actually, if we just listen to 'posts' UPDATE, that's cleaner IF the trigger exists.
-                    // Since I'm doing this as a fallback, let's try to trust 'posts' UPDATE first, 
-                    // but if that fails, this fallback handles INSERTS well (upvoting updates instantly).
-                    // For DELETE (downvoting), it's harder without post_id.
-
-                    // Let's assume standard behavior:
-                    // If we get an INSERT on interaction, we increment.
-                    // If we get a DELETE? We check if we have post_id.
-                    if (payload.old && (payload.old as any).post_id) {
-                        setPosts((prev) => prev.map(p =>
-                            p.id === (payload.old as any).post_id
-                                ? { ...p, relate_count: Math.max(0, (p.relate_count || 0) - 1) }
-                                : p
-                        ))
-                    }
+                } else if (payload.eventType === 'DELETE' && payload.old && payload.old.type === 'relate') {
+                    console.log('➖ Someone unrelated from post:', payload.old.post_id)
+                    setPosts((prev) => prev.map(p =>
+                        p.id === payload.old.post_id
+                            ? { ...p, relate_count: Math.max(0, (p.relate_count || 0) - 1) }
+                            : p
+                    ))
                 }
-
             })
             // Listen for Replies (to update count on feed)
             .on('postgres_changes', { event: '*', schema: 'public', table: 'replies' }, (payload) => {
@@ -194,14 +199,49 @@ export default function Feed() {
                     }
                 }
             })
+            // Listen for Profile changes (e.g., username, avatar_url updates)
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, (payload) => {
+                console.log('🔔 Profile Change:', payload.eventType, payload.new)
+                setPosts(prev => prev.map(post => {
+                    // Update if this post belongs to the updated user
+                    if (post.user_id === payload.new.id) {
+                        return {
+                            ...post,
+                            profiles: {
+                                ...post.profiles!,
+                                username: payload.new.username || post.profiles?.username,
+                                avatar_url: payload.new.avatar_url
+                            }
+                        }
+                    }
+                    return post
+                }))
+
+                // Update Header Profile if it's the current user
+                supabase.auth.getUser().then(({ data: { user } }) => {
+                    if (user && payload.new.id === user.id) {
+                        setCurrentUserProfile(prev => ({ ...prev!, ...payload.new }))
+                    }
+                })
+            })
             .subscribe((status) => {
-                console.log("🔌 Realtime Status:", status)
-                if (status === 'SUBSCRIBED') setRealtimeStatus('SUBSCRIBED')
-                if (status === 'CHANNEL_ERROR') setRealtimeStatus('ERROR')
-                if (status === 'CLOSED') setRealtimeStatus('ERROR')
+                if (status === 'SUBSCRIBED') {
+                    setRealtimeStatus('SUBSCRIBED')
+                    console.log('✅ Realtime connected successfully!')
+                } else if (status === 'CHANNEL_ERROR') {
+                    console.error('❌ Realtime subscription failed:', status)
+                    console.error('Check RLS policies and project configuration.')
+                    setRealtimeStatus('ERROR')
+                } else if (status === 'CLOSED') {
+                    console.log('📡 Realtime connection closed.')
+                    // Don't set state to ERROR if it's just a closure (unmount)
+                }
             })
 
+        console.log('🔌 Realtime channel initialized')
+
         return () => {
+            console.log('🔌 Cleaning up realtime channel')
             supabase.removeChannel(channel)
         }
     }, [])
@@ -210,21 +250,47 @@ export default function Feed() {
         <div className="w-full max-w-lg md:max-w-2xl mx-auto min-h-screen pb-20">
             {/* Header */}
             <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border px-4 py-4 rounded-b-xl">
-                <div className="flex items-center justify-between mb-4">
-                    <div>
-                        <h1 className="text-lg font-semibold tracking-tight">BITS Dubai</h1>
-                        <p className="text-xs text-muted-foreground">Posts reset in 30 days</p>
-                    </div>
+                <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                        <div className={`h-2 w-2 rounded-full ${realtimeStatus === 'SUBSCRIBED' ? 'bg-green-500 animate-pulse' :
-                            realtimeStatus === 'CONNECTING' ? 'bg-yellow-500' : 'bg-red-500'
-                            }`} />
-                        <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                            {realtimeStatus === 'SUBSCRIBED' ? 'LIVE' : realtimeStatus}
-                        </span>
+                        <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                            <div className="h-4 w-4 bg-primary rounded-full animate-pulse" />
+                        </div>
+                        <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-blue-600 bg-clip-text text-transparent">
+                            DropLet
+                        </h1>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2 px-2 py-1 rounded-full bg-secondary/50 border border-border/50">
+                            <span className={cn(
+                                "h-2 w-2 rounded-full",
+                                realtimeStatus === 'SUBSCRIBED' ? "bg-green-500 animate-pulse" :
+                                    realtimeStatus === 'CONNECTING' ? "bg-yellow-500" : "bg-red-500"
+                            )} />
+                            <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                                {realtimeStatus === 'SUBSCRIBED' ? 'LIVE' : realtimeStatus}
+                            </span>
+                        </div>
+
+                        <Link href="/profile" className="flex items-center gap-3 p-1.5 pr-4 rounded-full bg-secondary/30 hover:bg-secondary/50 transition-all border border-transparent hover:border-white/10 group">
+                            <div className="h-9 w-9 rounded-full bg-secondary/50 overflow-hidden border border-white/5 relative shadow-sm group-hover:scale-105 transition-transform">
+                                {currentUserProfile?.avatar_url ? (
+                                    <img src={currentUserProfile.avatar_url} alt="Me" className="h-full w-full object-cover" />
+                                ) : (
+                                    <User className="h-5 w-5 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-muted-foreground" />
+                                )}
+                            </div>
+                            <div className="flex flex-col items-start leading-none gap-0.5">
+                                <span className="text-xs font-bold text-foreground group-hover:text-primary transition-colors">
+                                    {currentUserProfile?.username || "Loading..."}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground">
+                                    {currentUserProfile?.university || "BPDC"}
+                                </span>
+                            </div>
+                        </Link>
                     </div>
                 </div>
-                <ProfileSection />
             </header>
 
             {/* Schema Error Banner */}
@@ -261,6 +327,9 @@ export default function Feed() {
                             replyCount={post.replies?.[0]?.count || 0}
                             initialHasRelated={initialHasRelated}
                             onDelete={() => setPosts(posts.filter(p => p.id !== post.id))}
+                            avatarUrl={post.profiles?.avatar_url}
+                            mediaUrl={post.media_url}
+                            mediaType={post.media_type}
                         />
                     )
                 })}

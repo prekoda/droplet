@@ -16,7 +16,7 @@ export default function ProfileSection() {
             if (user) {
                 const { data } = await supabase
                     .from('profiles')
-                    .select('username, university')
+                    .select('username, university, avatar_url')
                     .eq('id', user.id)
                     .single()
 
@@ -24,7 +24,26 @@ export default function ProfileSection() {
             }
         }
         fetchProfile()
+
+        // Realtime listener for own profile updates
+        const channel = createClient()
+            .channel('profile-section-updates')
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, async (payload) => {
+                const supabase = createClient()
+                const { data: { user } } = await supabase.auth.getUser()
+
+                if (user && payload.new.id === user.id) {
+                    setProfile(payload.new)
+                }
+            })
+            .subscribe()
+
+        return () => {
+            channel.unsubscribe()
+        }
     }, [])
+
+
 
     const handleLogout = async () => {
         const supabase = createClient()
@@ -38,8 +57,12 @@ export default function ProfileSection() {
         <div className="mb-6 p-4 rounded-xl bg-card border border-border/50 shadow-sm animate-in fade-in slide-in-from-top-4 duration-700">
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center text-muted-foreground">
-                        <User className="h-5 w-5" />
+                    <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center text-muted-foreground overflow-hidden border border-border">
+                        {profile.avatar_url ? (
+                            <img src={profile.avatar_url} alt={profile.username} className="h-full w-full object-cover" />
+                        ) : (
+                            <User className="h-5 w-5" />
+                        )}
                     </div>
                     <div>
                         <h3 className="font-semibold text-sm">{profile.username}</h3>

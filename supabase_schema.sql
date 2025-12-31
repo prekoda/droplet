@@ -1,7 +1,7 @@
 -- Enable RLS
 -- alter table auth.users enable row level security; -- (Often enabled by default, skipping to avoid permission errors)
 
--- Profiles: EXTENDED for Signup Requirements
+-- 1. Profiles: EXTENDED for Signup Requirements
 create table if not exists public.profiles (
   id uuid references auth.users on delete cascade not null primary key,
   first_name text,
@@ -12,7 +12,9 @@ create table if not exists public.profiles (
   mobile text,
   email text, -- Useful for quick lookups
   last_post_at timestamp with time zone,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  avatar_url text,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
 );
 alter table public.profiles enable row level security;
 
@@ -29,14 +31,17 @@ begin
     end if;
 end $$;
 
--- Posts
+-- 2. Posts
 create table if not exists public.posts (
   id uuid default gen_random_uuid() primary key,
   user_id uuid references public.profiles(id) on delete cascade not null,
   content text not null,
   tag text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  expires_at timestamp with time zone default timezone('utc'::text, now() + interval '30 days') not null
+  expires_at timestamp with time zone default timezone('utc'::text, now() + interval '30 days') not null,
+  relate_count int default 0 not null check (relate_count >= 0),
+  media_url text,
+  media_type text -- 'image', 'video', 'gif'
 );
 alter table public.posts enable row level security;
 
@@ -48,14 +53,22 @@ begin
     if not exists (select 1 from pg_policies where tablename = 'posts' and policyname = 'Users can create posts') then
         create policy "Users can create posts" on public.posts for insert with check (auth.uid() = user_id);
     end if;
+    if not exists (select 1 from pg_policies where tablename = 'posts' and policyname = 'Users can delete own posts') then
+        create policy "Users can delete own posts" on public.posts for delete using (auth.uid() = user_id);
+    end if;
 end $$;
 
--- Replies
+-- 3. Replies
 create table if not exists public.replies (
   id uuid default gen_random_uuid() primary key,
   post_id uuid references public.posts(id) on delete cascade not null,
   user_id uuid references public.profiles(id) not null,
   content text not null,
+  parent_id uuid references public.replies(id) on delete cascade,
+  is_deleted boolean default false,
+  is_edited boolean default false,
+  media_url text,
+  media_type text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 alter table public.replies enable row level security;
@@ -68,21 +81,15 @@ begin
     if not exists (select 1 from pg_policies where tablename = 'replies' and policyname = 'Users can reply') then
         create policy "Users can reply" on public.replies for insert with check (auth.uid() = user_id);
     end if;
-end $$;
-
--- Add new columns for sub-replies and soft delete if they don't exist
-alter table public.replies add column if not exists parent_id uuid references public.replies(id) on delete cascade;
-alter table public.replies add column if not exists is_deleted boolean default false;
-
--- Add update policy for soft delete
-do $$
-begin
     if not exists (select 1 from pg_policies where tablename = 'replies' and policyname = 'Users can update own replies') then
-        create policy "Users can update own replies" on public.replies for update using (auth.uid() = user_id);
+        create policy "Users can update own replies" on public.replies for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+    end if;
+    if not exists (select 1 from pg_policies where tablename = 'replies' and policyname = 'Users can delete own replies') then
+        create policy "Users can delete own replies" on public.replies for delete using (auth.uid() = user_id);
     end if;
 end $$;
 
--- Interactions
+-- 4. Interactions (Relates, Reports)
 create table if not exists public.interactions (
   id uuid default gen_random_uuid() primary key,
   post_id uuid references public.posts(id) on delete cascade not null,
@@ -98,53 +105,15 @@ begin
     if not exists (select 1 from pg_policies where tablename = 'interactions' and policyname = 'Users can create interactions') then
         create policy "Users can create interactions" on public.interactions for insert with check (auth.uid() = user_id);
     end if;
-end $$;
-
--- RPC to check if email exists (Security Definer to bypass RLS)
-create or replace function check_email_exists(email_input text)
-returns boolean
-language plpgsql
-security definer
-as $$
-declare
-  exists_flag boolean;
-begin
-  select exists(select 1 from public.profiles where email = email_input) into exists_flag;
-  return exists_flag;
-end;
-$$;
-
--- Additional Policies for User Features
-
--- Allow users to delete their own posts
--- Allow users to delete their own posts
-do $$
-begin
-    if not exists (select 1 from pg_policies where tablename = 'posts' and policyname = 'Users can delete own posts') then
-        create policy "Users can delete own posts" on public.posts for delete using (auth.uid() = user_id);
+    if not exists (select 1 from pg_policies where tablename = 'interactions' and policyname = 'Public interactions are visible') then
+        create policy "Public interactions are visible" on public.interactions for select using (true);
+    end if;
+    if not exists (select 1 from pg_policies where tablename = 'interactions' and policyname = 'Users can delete own interactions') then
+        create policy "Users can delete own interactions" on public.interactions for delete using (auth.uid() = user_id);
     end if;
 end $$;
 
--- Allow users to delete their own replies
-do $$
-begin
-    if not exists (select 1 from pg_policies where tablename = 'replies' and policyname = 'Users can delete own replies') then
-        create policy "Users can delete own replies" on public.replies for delete using (auth.uid() = user_id);
-    end if;
-end $$;
-
--- Allow users to update (edit) their own replies
-do $$
-begin
-    if not exists (select 1 from pg_policies where tablename = 'replies' and policyname = 'Users can update own replies') then
-        create policy "Users can update own replies" on public.replies for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
-    end if;
-end $$;
-
--- Add relate_count column to posts (for efficient sorting)
-alter table public.posts add column if not exists relate_count int default 0 not null check (relate_count >= 0);
-
--- Create reports table for flagged content
+-- 5. Reports
 create table if not exists public.reports (
   id uuid default gen_random_uuid() primary key,
   post_id uuid references public.posts(id) on delete cascade not null,
@@ -167,20 +136,7 @@ begin
     end if;
 end $$;
 
--- Interactions policies (read access for users to check their own interactions)
-do $$
-begin
-    if not exists (select 1 from pg_policies where tablename = 'interactions' and policyname = 'Users can read own interactions') then
-        create policy "Users can read own interactions" on public.interactions for select using (auth.uid() = user_id);
-    end if;
-    if not exists (select 1 from pg_policies where tablename = 'interactions' and policyname = 'Users can delete own interactions') then
-        create policy "Users can delete own interactions" on public.interactions for delete using (auth.uid() = user_id);
-    end if;
-end $$;
-
--- Function to update relate_count when interactions change
--- Function to update relate_count when interactions change
--- SECURITY DEFINER is crucial here because users don't have permission to UPDATE posts directly
+-- 6. Functions and Triggers
 create or replace function update_post_relate_count()
 returns trigger
 language plpgsql
@@ -202,17 +158,20 @@ create trigger trigger_update_relate_count
   for each row
   execute function update_post_relate_count();
 
--- Final Step: Backfill relate counts for existing posts
--- This ensures that if you have existing data, the counts are corrected immediately
-update public.posts p
-set relate_count = (
-    select count(*)
-    from public.interactions i
-    where i.post_id = p.id and i.type = 'relate'
-);
+create or replace function check_email_exists(email_input text)
+returns boolean
+language plpgsql
+security definer
+as $$
+declare
+  exists_flag boolean;
+begin
+  select exists(select 1 from public.profiles where email = email_input) into exists_flag;
+  return exists_flag;
+end;
+$$;
 
--- ENABLE REALTIME BROADCASTING (Safe Version)
--- 1. Create the publication 'supabase_realtime' if it doesn't exist
+-- 7. Realtime Configuration
 do $$
 begin
   if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
@@ -220,7 +179,6 @@ begin
   end if;
 end $$;
 
--- 2. Safely add tables to the publication
 do $$
 begin
   if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'posts') then
@@ -232,16 +190,57 @@ begin
   if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'replies') then
     alter publication supabase_realtime add table replies;
   end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'profiles') then
+    alter publication supabase_realtime add table profiles;
+  end if;
 end $$;
 
--- 3. Set Replica Identity to FULL
 alter table posts replica identity full;
 alter table interactions replica identity full;
 alter table replies replica identity full;
 
--- 4. Verify Policy for Public Access to Interactions
-drop policy if exists "Public interactions are visible" on public.interactions;
-create policy "Public interactions are visible" on public.interactions for select using (true);
+-- 8. Storage Buckets and Policies
+insert into storage.buckets (id, name, public)
+values ('avatars', 'avatars', true), ('post_media', 'post_media', true)
+on conflict (id) do nothing;
 
--- 5. Add is_edited column (for "Edited" status)
-alter table public.replies add column if not exists is_edited boolean default false;
+-- Avatar Policies
+drop policy if exists "Avatar images are publicly accessible" on storage.objects;
+create policy "Avatar images are publicly accessible" on storage.objects for select using ( bucket_id = 'avatars' );
+drop policy if exists "Users can upload avatars" on storage.objects;
+create policy "Users can upload avatars" on storage.objects for insert with check ( bucket_id = 'avatars' and auth.role() = 'authenticated' );
+drop policy if exists "Users can update avatars" on storage.objects;
+create policy "Users can update avatars" on storage.objects for update using ( bucket_id = 'avatars' and auth.role() = 'authenticated' );
+
+-- Post Media Policies
+drop policy if exists "Media is publicly accessible" on storage.objects;
+create policy "Media is publicly accessible" on storage.objects for select using ( bucket_id = 'post_media' );
+drop policy if exists "Users can upload media" on storage.objects;
+create policy "Users can upload media" on storage.objects for insert with check ( bucket_id = 'post_media' and auth.role() = 'authenticated' );
+drop policy if exists "Users can delete own media" on storage.objects;
+create policy "Users can delete own media" on storage.objects for delete using ( bucket_id = 'post_media' and auth.uid() = owner );
+
+-- 9. Final Fixes for Realtime (Ensuring SELECT is visible)
+-- Note: Disabling RLS temporarily for these tables often helps debug "CLOSED" status
+-- ALTER TABLE public.posts DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.interactions DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.replies DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.profiles DISABLE ROW LEVEL SECURITY;
+
+-- Proper SELECT Policies (if RLS is enabled)
+DROP POLICY IF EXISTS "Posts are visible to everyone" ON public.posts;
+CREATE POLICY "Posts are visible to everyone" ON public.posts FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Interactions are visible to everyone" ON public.interactions;
+CREATE POLICY "Interactions are visible to everyone" ON public.interactions FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Replies are visible to everyone" ON public.replies;
+CREATE POLICY "Replies are visible to everyone" ON public.replies FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Profiles are visible to everyone" ON public.profiles;
+CREATE POLICY "Profiles are visible to everyone" ON public.profiles FOR SELECT USING (true);
+
+-- Backfill counts
+update public.posts p
+set relate_count = (
+    select count(*)
+    from public.interactions i
+    where i.post_id = p.id and i.type = 'relate'
+);
